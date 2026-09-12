@@ -2,7 +2,7 @@
 
 Built for the Hackathon Challenge: *"Build a working agent that belongs somewhere new."*
 
-Most AI agents wait inside a separate, lonely chat window. This agent lives ambiently inside group chats on Discord, Slack, WhatsApp, or Telegram where conversations and everyday work actually happen. It watches silently, steps in only when human conversation stalls out, and automatically tracks commitments so promises never slip through the cracks.
+Most AI agents wait inside a separate, lonely chat window. This agent lives ambiently inside group chats where conversations and everyday work actually happen. For this hackathon, we built and tested a fully working implementation for **Discord**. While our core architecture is built to support WhatsApp, Slack, and Telegram in the future, Discord is where it lives and operates today. It watches silently, steps in only when human conversation stalls out, and automatically tracks commitments so promises never slip through the cracks.
 
 ---
 
@@ -14,7 +14,7 @@ We built an ambient group chat assistant that pays attention to what people actu
 Most bots are noisy. They barge into channels with giant blocks of text the second anyone types a keyword, which makes people want to kick them out immediately. We built the opposite: a patient, context-aware co-pilot that watches quietly, speaks only when needed, and does the boring administrative work in the background.
 
 ### The Problem and Use Case
-Imagine a group chat with your friends on Discord, Slack, WhatsApp, or Telegram.
+Imagine a group chat with your friends on Discord (and eventually WhatsApp, Slack, or Telegram).
 
 Someone drops a question: *"Where are we eating tonight?"*
 
@@ -50,6 +50,23 @@ By meeting groups where they already talk, listening for conversational context,
 - **Customizable Event Templates:** Supports per-channel and per-user templates (`/channel-template` and `/calendar-template`) using placeholders like `{title}`, `{author}`, and `{channel}` with strict hierarchy resolution.
 - **Model Context Protocol (MCP) and Webhooks:** Exposes a native JSON-RPC 2.0 MCP server and real-time webhook dispatcher (`commitment.created`, `commitment.completed`) so external tools, Cursor, Claude, or scripts can inspect and update commitments programmatically.
 - **Ambient Reactions Over Message Spam:** Uses subtle emoji reactions on Discord instead of disruptive wall-of-text embeds, keeping conversations clean.
+
+---
+
+## Current Platform Support and Roadmap
+
+### Implemented Today: Discord
+For this hackathon, we focused on shipping a sharp, fully functional implementation for **Discord**. Everything documented and demonstrated runs live against the Discord Gateway API with slash commands, interactive buttons, ephemeral error handling, reactions, and conversational history reading.
+
+### Planned for Future Releases: WhatsApp, Slack, and Telegram
+Our architecture was intentionally designed with strict separation between the messaging interface and the intelligence pipeline:
+- The core logic (`pipeline/filter.py`, `llm/extractor.py`, `db/database.py`, `integrations/calendar_service.py`, `scheduler/service.py`) is completely platform-independent.
+- Adding a new messaging platform only requires a gateway adapter to listen for messages and dispatch responses.
+
+Upcoming integrations on our roadmap:
+1. **Slack:** Using the Slack Bolt SDK to bring silent commitment tracking and standup accountability to team workspaces and developer channels.
+2. **WhatsApp:** Connecting via the Meta Cloud API to rescue dinner dilemmas and track informal promises in everyday friend and family group chats.
+3. **Telegram:** Integrating with the Telegram Bot API for study groups, developer collectives, and community channels.
 
 ---
 
