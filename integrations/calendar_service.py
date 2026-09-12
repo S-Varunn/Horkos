@@ -50,6 +50,7 @@ class GoogleCalendarService:
 
         # Service cache keyed by discord_user_id
         self._user_services: Dict[str, Any] = {}
+        self._pending_flows: Dict[str, Any] = {}
         self.global_service = None
         self.is_mock = True
         self._init_global_fallback()
@@ -98,7 +99,8 @@ class GoogleCalendarService:
         flow = Flow.from_client_secrets_file(
             self.credentials_file,
             scopes=SCOPES,
-            redirect_uri=self.redirect_uri
+            redirect_uri=self.redirect_uri,
+            autogenerate_code_verifier=False
         )
         auth_url, _ = flow.authorization_url(
             access_type="offline",
@@ -106,6 +108,7 @@ class GoogleCalendarService:
             prompt="consent",
             state=discord_user_id
         )
+        self._pending_flows[discord_user_id] = flow
         return auth_url
 
     async def handle_oauth_code(self, code: str, discord_user_id: str) -> Dict[str, Any]:
@@ -114,11 +117,15 @@ class GoogleCalendarService:
             from google_auth_oauthlib.flow import Flow
             from googleapiclient.discovery import build
 
-            flow = Flow.from_client_secrets_file(
-                self.credentials_file,
-                scopes=SCOPES,
-                redirect_uri=self.redirect_uri
-            )
+            flow = self._pending_flows.pop(discord_user_id, None)
+            if not flow:
+                flow = Flow.from_client_secrets_file(
+                    self.credentials_file,
+                    scopes=SCOPES,
+                    redirect_uri=self.redirect_uri,
+                    autogenerate_code_verifier=False
+                )
+
             flow.fetch_token(code=code)
             creds = flow.credentials
 
