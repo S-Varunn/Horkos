@@ -1,8 +1,12 @@
 import asyncio
 import logging
+import os
 import signal
 import sys
 import discord
+
+# Relax token scope checks for Google OAuth
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 from config import settings
 from db.database import Database

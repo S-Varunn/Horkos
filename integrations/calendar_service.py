@@ -12,9 +12,13 @@ from db.models import Commitment
 
 logger = logging.getLogger("CommitmentRadar.Calendar")
 
+# Allow Google OAuth to add default scopes (such as openid) without raising Warning/Exception
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/userinfo.email"
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid"
 ]
 
 
