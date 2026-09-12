@@ -1,4 +1,4 @@
-# 🎯 Commitment Radar: Ambient Discord Agent
+# 🎯 Horkus: the agent that lives where the conversation happens
 
 > **Built for the Hackathon Challenge: *"Build a working agent that belongs somewhere new."***
 
