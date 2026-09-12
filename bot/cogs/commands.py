@@ -405,6 +405,125 @@ class CommandsCog(commands.Cog):
         else:
             await interaction.followup.send("You are already using the clean default template.", ephemeral=True)
 
+    channel_template = app_commands.Group(
+        name="channel-template",
+        description="Customize how tasks created in this channel look on Google Calendar"
+    )
+
+    @channel_template.command(name="set", description="Set custom calendar task templates for this channel")
+    @app_commands.describe(
+        title="Title template for this channel (e.g. '[DEV] {task}' or '!!BugFix!! {task}')",
+        completed="Completed title template for this channel (e.g. '[RESOLVED] {task}')",
+        description="Optional custom description template for this channel"
+    )
+    async def channel_template_set(
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        completed: Optional[str] = None,
+        description: Optional[str] = None
+    ):
+        await interaction.response.defer(ephemeral=True)
+        channel_id = str(interaction.channel_id)
+        guild_id = str(interaction.guild_id) if interaction.guild_id else None
+        ch_name = getattr(interaction.channel, "name", "channel")
+        comp_tpl = completed or "[Done] {task}"
+
+        saved = await self.db.save_channel_calendar_template(
+            channel_id=channel_id,
+            title_template=title,
+            completed_template=comp_tpl,
+            description_template=description,
+            guild_id=guild_id,
+            channel_name=ch_name
+        )
+
+        sample_context = {
+            "task": "Review pull request #42",
+            "task_title": "Review pull request #42",
+            "author": interaction.user.display_name,
+            "user_name": interaction.user.display_name,
+            "recipient": "Sarah",
+            "timeframe": "by 5 PM",
+            "context": "Sarah requested review on PR #42",
+            "raw_text": "I'll review PR #42 by 5 PM",
+            "channel": ch_name
+        }
+
+        title_preview = render_calendar_template(saved.title_template, sample_context)
+        comp_preview = render_calendar_template(saved.completed_template, sample_context)
+        desc_preview = render_calendar_template(saved.description_template, sample_context) if saved.description_template else "Standard channel metadata"
+
+        embed = discord.Embed(
+            title=f"Channel Calendar Template Saved for #{ch_name}",
+            description=f"Commitments made in this channel will now use this format by default!",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Task Title Format", value=f"`{saved.title_template}`\n👉 **Preview**: {title_preview}", inline=False)
+        embed.add_field(name="Completed Format", value=f"`{saved.completed_template}`\n👉 **Preview**: {comp_preview}", inline=False)
+        if saved.description_template:
+            embed.add_field(name="Description Format", value=f"```text\n{desc_preview}\n```", inline=False)
+        embed.set_footer(text="Available variables: {task}, {channel}, {author}, {recipient}, {timeframe}, {context}, {raw_text}")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @channel_template.command(name="view", description="View active Google Calendar task template for this channel")
+    async def channel_template_view(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        channel_id = str(interaction.channel_id)
+        ch_name = getattr(interaction.channel, "name", "channel")
+        tpl = await self.db.get_channel_calendar_template(channel_id)
+
+        sample_context = {
+            "task": "Review pull request #42",
+            "task_title": "Review pull request #42",
+            "author": interaction.user.display_name,
+            "user_name": interaction.user.display_name,
+            "recipient": "Sarah",
+            "timeframe": "by 5 PM",
+            "context": "Sarah requested review",
+            "raw_text": "I'll review PR #42 by 5 PM",
+            "channel": ch_name
+        }
+
+        embed = discord.Embed(
+            title=f"Calendar Template for #{ch_name}",
+            color=discord.Color.purple()
+        )
+
+        if tpl:
+            title_prev = render_calendar_template(tpl.title_template, sample_context)
+            comp_prev = render_calendar_template(tpl.completed_template, sample_context)
+            embed.description = "This channel has an **active custom template override**."
+            embed.add_field(name="Channel Title Template", value=f"`{tpl.title_template}`\n👉 Preview: {title_prev}", inline=False)
+            embed.add_field(name="Channel Completed Template", value=f"`{tpl.completed_template}`\n👉 Preview: {comp_prev}", inline=False)
+            if tpl.description_template:
+                desc_prev = render_calendar_template(tpl.description_template, sample_context)
+                embed.add_field(name="Description Template", value=f"```text\n{desc_prev}\n```", inline=False)
+        else:
+            embed.description = f"No custom channel template is set for #{ch_name}.\nCommitments in this channel fall back to each user's **personal `/calendar-template`** (or clean default)."
+
+        embed.add_field(
+            name="Available Variables",
+            value="`{task}` - Task description\n`{channel}` - Channel name\n`{author}` - Your name\n`{recipient}` - Recipient or Team\n`{timeframe}` - Deadline text\n`{context}` - Conversation snippet\n`{raw_text}` - Original chat message",
+            inline=False
+        )
+        embed.set_footer(text="Use /channel-template set to configure or /channel-template reset to clear")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @channel_template.command(name="reset", description="Reset this channel's calendar template back to user/default fallback")
+    async def channel_template_reset(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        channel_id = str(interaction.channel_id)
+        ch_name = getattr(interaction.channel, "name", "channel")
+        deleted = await self.db.delete_channel_calendar_template(channel_id)
+
+        if deleted:
+            await interaction.followup.send(f"Calendar template for #{ch_name} has been cleared. Commitments will now fall back to user templates.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"No custom template was active for #{ch_name}.", ephemeral=True)
+
+
 
 async def setup(
     bot: commands.Bot,

@@ -1,7 +1,7 @@
 import aiosqlite
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from db.models import Commitment, CommitmentStatus, UserGoogleAuth, UserCalendarTemplate, utc_now
+from db.models import Commitment, CommitmentStatus, UserGoogleAuth, UserCalendarTemplate, ChannelCalendarTemplate, utc_now
 
 
 class Database:
@@ -47,6 +47,20 @@ class Database:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS user_calendar_templates (
                     discord_user_id TEXT PRIMARY KEY,
+                    title_template TEXT NOT NULL,
+                    completed_template TEXT NOT NULL,
+                    description_template TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # Per-Channel Custom Calendar Template Table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS channel_calendar_templates (
+                    channel_id TEXT PRIMARY KEY,
+                    guild_id TEXT,
+                    channel_name TEXT,
                     title_template TEXT NOT NULL,
                     completed_template TEXT NOT NULL,
                     description_template TEXT,
@@ -314,6 +328,77 @@ class Database:
             cursor = await db.execute(
                 "DELETE FROM user_calendar_templates WHERE discord_user_id = ?",
                 (discord_user_id,)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def save_channel_calendar_template(
+        self,
+        channel_id: str,
+        title_template: str,
+        completed_template: Optional[str] = None,
+        description_template: Optional[str] = None,
+        guild_id: Optional[str] = None,
+        channel_name: Optional[str] = None
+    ) -> ChannelCalendarTemplate:
+        """Saves or updates a channel's custom calendar event template."""
+        now = utc_now().isoformat()
+        comp_tpl = completed_template or "[Done] {task}"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO channel_calendar_templates (
+                    channel_id, guild_id, channel_name, title_template, completed_template,
+                    description_template, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    guild_id = COALESCE(excluded.guild_id, channel_calendar_templates.guild_id),
+                    channel_name = COALESCE(excluded.channel_name, channel_calendar_templates.channel_name),
+                    title_template = excluded.title_template,
+                    completed_template = excluded.completed_template,
+                    description_template = excluded.description_template,
+                    updated_at = excluded.updated_at
+            """, (channel_id, guild_id, channel_name, title_template, comp_tpl, description_template, now, now))
+            await db.commit()
+
+        return ChannelCalendarTemplate(
+            channel_id=channel_id,
+            guild_id=guild_id,
+            channel_name=channel_name,
+            title_template=title_template,
+            completed_template=comp_tpl,
+            description_template=description_template,
+            created_at=datetime.fromisoformat(now),
+            updated_at=datetime.fromisoformat(now)
+        )
+
+    async def get_channel_calendar_template(self, channel_id: str) -> Optional[ChannelCalendarTemplate]:
+        """Retrieves a channel's custom calendar event template if configured."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM channel_calendar_templates WHERE channel_id = ?",
+                (channel_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return ChannelCalendarTemplate(
+                        channel_id=row["channel_id"],
+                        guild_id=row["guild_id"],
+                        channel_name=row["channel_name"],
+                        title_template=row["title_template"],
+                        completed_template=row["completed_template"],
+                        description_template=row["description_template"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"])
+                    )
+        return None
+
+    async def delete_channel_calendar_template(self, channel_id: str) -> bool:
+        """Deletes a channel's custom calendar event template."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM channel_calendar_templates WHERE channel_id = ?",
+                (channel_id,)
             )
             await db.commit()
             return cursor.rowcount > 0

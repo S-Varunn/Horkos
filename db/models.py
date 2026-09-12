@@ -24,6 +24,7 @@ class Commitment(BaseModel):
     user_id: str
     user_name: str
     channel_id: str
+    channel_name: Optional[str] = None
     guild_id: Optional[str] = None
     message_id: str
     raw_text: str
@@ -54,4 +55,16 @@ class UserCalendarTemplate(BaseModel):
     description_template: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ChannelCalendarTemplate(BaseModel):
+    channel_id: str
+    guild_id: Optional[str] = None
+    channel_name: Optional[str] = None
+    title_template: str = "{task}"
+    completed_template: str = "[Done] {task}"
+    description_template: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
 

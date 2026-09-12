@@ -160,3 +160,98 @@ async def test_calendar_service_complete_event_uses_user_template(tmp_path):
     assert updated_body["summary"] == "Resolved: Submit invoice"
     assert updated_body["colorId"] == "10"
 
+
+@pytest.mark.asyncio
+async def test_database_channel_calendar_template(tmp_path):
+    db_file = os.path.join(tmp_path, "test_ch_templates.db")
+    db = Database(db_file)
+    await db.init_db()
+
+    channel_id = "chan_123"
+
+    # Initially None
+    assert await db.get_channel_calendar_template(channel_id) is None
+
+    # Save channel template
+    saved = await db.save_channel_calendar_template(
+        channel_id=channel_id,
+        title_template="[DEV] {task}",
+        completed_template="[DEV-DONE] {task}",
+        channel_name="dev-team"
+    )
+    assert saved.channel_id == channel_id
+    assert saved.title_template == "[DEV] {task}"
+    assert saved.channel_name == "dev-team"
+
+    # Retrieve
+    retrieved = await db.get_channel_calendar_template(channel_id)
+    assert retrieved is not None
+    assert retrieved.title_template == "[DEV] {task}"
+
+    # Delete
+    assert await db.delete_channel_calendar_template(channel_id) is True
+    assert await db.get_channel_calendar_template(channel_id) is None
+
+
+@pytest.mark.asyncio
+async def test_template_hierarchy_channel_over_user(tmp_path):
+    db_file = os.path.join(tmp_path, "test_hierarchy.db")
+    db = Database(db_file)
+    await db.init_db()
+
+    user_id = "user_hierarchy"
+    channel_id = "chan_hierarchy"
+
+    # 1. Set user template
+    await db.save_user_calendar_template(
+        discord_user_id=user_id,
+        title_template="UserTemplate: {task}"
+    )
+
+    # 2. Set channel template
+    await db.save_channel_calendar_template(
+        channel_id=channel_id,
+        title_template="[#{channel}] {task}",
+        channel_name="eng-squad"
+    )
+
+    calendar_service = GoogleCalendarService(db=db, enabled=True)
+    mock_service = MagicMock()
+    mock_events = MagicMock()
+    mock_insert = MagicMock()
+    mock_insert.execute.return_value = {"id": "event_h", "htmlLink": "https://calendar.google.com/test"}
+    mock_events.insert.return_value = mock_insert
+    mock_service.events.return_value = mock_events
+    calendar_service.get_service_for_user = AsyncMock(return_value=mock_service)
+
+    commitment = Commitment(
+        id=99,
+        user_id=user_id,
+        user_name="Alice",
+        channel_id=channel_id,
+        channel_name="eng-squad",
+        message_id="m99",
+        task_title="Deploy v2 backend",
+        deadline_utc=datetime(2026, 9, 12, 18, 0, 0, tzinfo=timezone.utc),
+        status=CommitmentStatus.PENDING,
+        raw_text="I will deploy v2 backend by 6pm"
+    )
+
+    # Channel template should take priority over user template
+    await calendar_service.schedule_commitment_event(commitment)
+    insert_call_kwargs = mock_events.insert.call_args[1]
+    assert insert_call_kwargs["body"]["summary"] == "[#eng-squad] Deploy v2 backend"
+
+    # Now remove channel template -> should fall back to user template
+    await db.delete_channel_calendar_template(channel_id)
+    await calendar_service.schedule_commitment_event(commitment)
+    insert_call_kwargs2 = mock_events.insert.call_args[1]
+    assert insert_call_kwargs2["body"]["summary"] == "UserTemplate: Deploy v2 backend"
+
+    # Now remove user template -> should fall back to clean default {task}
+    await db.delete_user_calendar_template(user_id)
+    await calendar_service.schedule_commitment_event(commitment)
+    insert_call_kwargs3 = mock_events.insert.call_args[1]
+    assert insert_call_kwargs3["body"]["summary"] == "Deploy v2 backend"
+
+

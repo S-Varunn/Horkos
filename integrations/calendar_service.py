@@ -277,13 +277,25 @@ class GoogleCalendarService:
 
         reminders_list = reminder_minutes or self.default_reminders
 
-        # Retrieve user's custom template if configured
+        # Resolution Hierarchy: Channel Template -> User Template -> Clean Default
+        channel_template = None
         user_template = None
-        if self.db and commitment.user_id:
-            try:
-                user_template = await self.db.get_user_calendar_template(commitment.user_id)
-            except Exception as te:
-                logger.warning(f"Could not load calendar template for user {commitment.user_id}: {te}")
+        channel_name = getattr(commitment, "channel_name", None) or "chat"
+
+        if self.db:
+            if commitment.channel_id:
+                try:
+                    channel_template = await self.db.get_channel_calendar_template(commitment.channel_id)
+                    if channel_template and channel_template.channel_name:
+                        channel_name = channel_template.channel_name
+                except Exception as cte:
+                    logger.warning(f"Could not load channel calendar template for {commitment.channel_id}: {cte}")
+
+            if commitment.user_id:
+                try:
+                    user_template = await self.db.get_user_calendar_template(commitment.user_id)
+                except Exception as te:
+                    logger.warning(f"Could not load user calendar template for {commitment.user_id}: {te}")
 
         template_context = {
             "task": commitment.task_title,
@@ -294,21 +306,29 @@ class GoogleCalendarService:
             "timeframe": commitment.relative_deadline_text or "Flexible",
             "context": commitment.context_snippet or "",
             "raw_text": commitment.raw_text,
+            "channel": channel_name,
             "id": str(commitment.id or "")
         }
 
-        if user_template and user_template.title_template:
+        # 1. Resolve Title Template
+        if channel_template and channel_template.title_template:
+            event_title = render_calendar_template(channel_template.title_template, template_context)
+        elif user_template and user_template.title_template:
             event_title = render_calendar_template(user_template.title_template, template_context)
         else:
             event_title = commitment.task_title
 
-        if user_template and user_template.description_template:
+        # 2. Resolve Description Template
+        if channel_template and channel_template.description_template:
+            description = render_calendar_template(channel_template.description_template, template_context)
+        elif user_template and user_template.description_template:
             description = render_calendar_template(user_template.description_template, template_context)
         else:
             description = (
                 f"Task: {commitment.task_title}\n"
                 f"Promised by: {commitment.user_name}\n"
                 f"Recipient: {commitment.recipient or 'Team'}\n"
+                f"Channel: #{channel_name}\n"
                 f"Timeframe: {commitment.relative_deadline_text or 'Flexible'}\n"
                 f"Context: {commitment.context_snippet or 'Micro-commitment captured ambiently'}\n"
                 f"Original Message: \"{commitment.raw_text}\""
@@ -419,9 +439,10 @@ class GoogleCalendarService:
         self,
         event_id: str,
         task_title: Optional[str] = None,
-        discord_user_id: Optional[str] = None
+        discord_user_id: Optional[str] = None,
+        channel_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Marks event completed in user's calendar (changes color to Green and prepends [✅ Done])."""
+        """Marks event completed in user's calendar (applies channel/user completed template and Green badge)."""
         if not event_id:
             return None
 
@@ -437,20 +458,39 @@ class GoogleCalendarService:
                         eventId=event_id
                     ).execute()
                 )
+                channel_template = None
                 user_template = None
-                if self.db and discord_user_id:
-                    try:
-                        user_template = await self.db.get_user_calendar_template(discord_user_id)
-                    except Exception as te:
-                        logger.warning(f"Could not load calendar template for complete_event: {te}")
+                channel_name = "chat"
 
-                comp_tpl = user_template.completed_template if (user_template and user_template.completed_template) else "[Done] {task}"
+                if self.db:
+                    if channel_id:
+                        try:
+                            channel_template = await self.db.get_channel_calendar_template(channel_id)
+                            if channel_template and channel_template.channel_name:
+                                channel_name = channel_template.channel_name
+                        except Exception as cte:
+                            logger.warning(f"Could not load channel template for complete_event: {cte}")
+
+                    if discord_user_id:
+                        try:
+                            user_template = await self.db.get_user_calendar_template(discord_user_id)
+                        except Exception as te:
+                            logger.warning(f"Could not load user template for complete_event: {te}")
+
+                if channel_template and channel_template.completed_template:
+                    comp_tpl = channel_template.completed_template
+                elif user_template and user_template.completed_template:
+                    comp_tpl = user_template.completed_template
+                else:
+                    comp_tpl = "[Done] {task}"
+
                 summary = event.get("summary", "")
                 clean_task = task_title or summary.replace("🎯 [Commitment] ", "").replace("🎯 ", "").strip()
                 template_context = {
                     "task": clean_task,
                     "task_title": clean_task,
-                    "title": summary
+                    "title": summary,
+                    "channel": channel_name
                 }
                 event["summary"] = render_calendar_template(comp_tpl, template_context)
                 event["colorId"] = "10"  # Google Calendar Green (Basil)

@@ -110,7 +110,8 @@ class EventsCog(commands.Cog):
                                     await self.calendar_service.complete_event(
                                         event_id=matched.calendar_event_id,
                                         task_title=matched.task_title,
-                                        discord_user_id=user_id
+                                        discord_user_id=user_id,
+                                        channel_id=str(message.channel.id)
                                     )
                                 except Exception as ce:
                                     logger.warning(f"Could not complete calendar event: {ce}")
@@ -173,11 +174,13 @@ class EventsCog(commands.Cog):
             cal_link = None
             if self.calendar_service and settings.auto_schedule_calendar:
                 try:
+                    ch_name = getattr(message.channel, "name", "chat")
                     cal_res = await self.calendar_service.schedule_commitment_event(
                         commitment=Commitment(
                             user_id=str(message.author.id),
                             user_name=message.author.display_name,
                             channel_id=str(message.channel.id),
+                            channel_name=ch_name,
                             message_id=str(message.id),
                             raw_text=message.content,
                             task_title=extracted.task_title,
