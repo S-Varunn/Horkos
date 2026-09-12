@@ -3,11 +3,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PYTHON="$SCRIPT_DIR/../venv/bin/python"
-
-if [ ! -f "$VENV_PYTHON" ]; then
-    echo "❌ Virtual environment python not found at: $VENV_PYTHON"
-    exit 1
+if [ -f "$SCRIPT_DIR/venv/bin/python" ]; then
+    VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
+elif [ -f "$SCRIPT_DIR/../venv/bin/python" ]; then
+    VENV_PYTHON="$SCRIPT_DIR/../venv/bin/python"
+else
+    VENV_PYTHON="python3"
 fi
 
 echo "🚀 Starting Commitment Radar Bot using venv: $VENV_PYTHON"
