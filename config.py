@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     google_calendar_id: str = Field(default="primary", alias="GOOGLE_CALENDAR_ID")
     auto_schedule_calendar: bool = Field(default=True, alias="AUTO_SCHEDULE_CALENDAR")
     calendar_reminder_minutes: str = Field(default="30,10", alias="CALENDAR_REMINDER_MINUTES")
+    google_oauth_port: int = Field(default=8080, alias="GOOGLE_OAUTH_PORT")
+    google_oauth_redirect_uri: str = Field(
+        default="http://localhost:8080/oauth/callback",
+        alias="GOOGLE_OAUTH_REDIRECT_URI"
+    )
 
 
 settings = Settings()

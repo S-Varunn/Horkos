@@ -13,6 +13,7 @@ from bot.client import CommitmentRadarBot
 from bot.ui.embeds import create_commitment_embed
 from bot.ui.views import CommitmentActionView
 from integrations.calendar_service import GoogleCalendarService
+from integrations.oauth_server import OAuthCallbackServer
 
 # Setup structured logging
 logging.basicConfig(
@@ -39,11 +40,18 @@ async def main():
     logger.info(f"Initializing LLM Extractor (Model: {settings.llm_model})...")
     extractor = CommitmentExtractor()
 
-    # 3. Initialize Google Calendar Service
+    # 3. Initialize Google Calendar Service (Per-User Manager)
     logger.info("Initializing Google Calendar Service...")
-    calendar_service = GoogleCalendarService()
+    calendar_service = GoogleCalendarService(db=db)
 
-    # 4. Initialize Discord Bot
+    # 4. Start embedded OAuth Callback Server for multi-user sign-ins
+    oauth_server = OAuthCallbackServer(
+        port=settings.google_oauth_port,
+        token_handler=calendar_service.handle_oauth_code
+    )
+    await oauth_server.start()
+
+    # 5. Initialize Discord Bot
     bot = CommitmentRadarBot(db=db, extractor=extractor, calendar_service=calendar_service)
 
     # 5. Define alert callback when deadline is within advance window (e.g. 30m)
@@ -83,6 +91,7 @@ async def main():
     def shutdown():
         logger.info("Shutdown signal received. Cleaning up...")
         scheduler.stop()
+        asyncio.create_task(oauth_server.stop())
         asyncio.create_task(bot.close())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -104,6 +113,7 @@ async def main():
             logger.error(f"Bot encountered an error: {e}")
         finally:
             scheduler.stop()
+            await oauth_server.stop()
     else:
         logger.info("Bot startup bypassed because DISCORD_TOKEN is not set.")
         logger.info("Base app modules (DB, LLM, Filter, Scheduler) are ready for testing.")

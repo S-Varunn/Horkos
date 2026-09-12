@@ -146,6 +146,88 @@ class CommandsCog(commands.Cog):
             ephemeral=True
         )
 
+    @app_commands.command(name="calendar-connect", description="Connect your personal Google Calendar to Commitment Radar")
+    async def calendar_connect(self, interaction: discord.Interaction):
+        if not self.calendar_service or not self.calendar_service.enabled:
+            await interaction.response.send_message("❌ Google Calendar integration is disabled.", ephemeral=True)
+            return
+
+        try:
+            auth_url = self.calendar_service.get_authorization_url(str(interaction.user.id))
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="Sign In with Google", url=auth_url, emoji="🌐"))
+            await interaction.response.send_message(
+                "🔗 **Link your personal Google Calendar:**\n"
+                "1. Click the button below to sign in with Google.\n"
+                "2. Grant calendar permissions to Commitment Radar.\n"
+                "3. Once linked, the bot will automatically book your micro-commitments to your personal calendar with reminder popups!\n\n"
+                "*(If you copy the authorization code manually, you can also run `/calendar-auth code:<code>`)*",
+                view=view,
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Could not create authorization link: {e}", ephemeral=True)
+
+    @app_commands.command(name="calendar-auth", description="Complete Google Calendar connection using an authorization code")
+    @app_commands.describe(code="The authorization code provided by Google")
+    async def calendar_auth(self, interaction: discord.Interaction, code: str):
+        await interaction.response.defer(ephemeral=True)
+        if not self.calendar_service:
+            await interaction.followup.send("❌ Google Calendar integration is not active.", ephemeral=True)
+            return
+
+        result = await self.calendar_service.handle_oauth_code(code.strip(), str(interaction.user.id))
+        if result.get("success"):
+            email_info = f" ({result['email']})" if result.get("email") else ""
+            await interaction.followup.send(
+                f"✅ **Google Calendar Connected!**{email_info}\n"
+                "Your promises and tasks will now be automatically booked onto your Google Calendar with native reminder notifications.",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ Failed to connect Google Calendar: {result.get('error', 'Unknown error')}\n"
+                "Please run `/calendar-connect` to get a fresh link.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="calendar-disconnect", description="Disconnect your personal Google Calendar")
+    async def calendar_disconnect(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        deleted = await self.db.delete_user_google_auth(user_id)
+        if self.calendar_service:
+            self.calendar_service._user_services.pop(user_id, None)
+
+        if deleted:
+            await interaction.followup.send("✅ Disconnected your Google Calendar from Commitment Radar.", ephemeral=True)
+        else:
+            await interaction.followup.send("ℹ️ You did not have a connected Google Calendar.", ephemeral=True)
+
+    @app_commands.command(name="calendar-status", description="Check if your personal Google Calendar is connected")
+    async def calendar_user_status(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        user_auth = await self.db.get_user_google_auth(user_id)
+
+        embed = discord.Embed(
+            title="📅 Your Google Calendar Status",
+            color=discord.Color.green() if user_auth else discord.Color.gold(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        if user_auth:
+            embed.description = "🟢 **Connected**\nYour commitments will be scheduled directly into your calendar."
+            if user_auth.google_email:
+                embed.add_field(name="Google Account", value=user_auth.google_email, inline=False)
+            embed.add_field(name="Connected Since", value=user_auth.created_at.strftime("%Y-%m-%d %H:%M UTC"), inline=True)
+        else:
+            embed.description = (
+                "🟡 **Not Connected**\n"
+                "Use `/calendar-connect` to link your Google Calendar so the agent can autonomously book events and set reminders on your devices."
+            )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @app_commands.command(name="radar-status", description="Show Commitment Radar agent status and settings")
     async def radar_status(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -159,16 +241,14 @@ class CommandsCog(commands.Cog):
         embed.add_field(name="Timezone", value=settings.default_timezone, inline=True)
 
         # Google Calendar Status
-        if self.calendar_service and not self.calendar_service.is_mock:
-            cal_desc = "🟢 Connected (Live API)"
-        elif settings.google_calendar_enabled:
-            cal_desc = "🟡 Connected (Simulation / Mock Mode)"
+        if self.calendar_service and self.calendar_service.enabled:
+            cal_desc = f"🟢 Active (Multi-User OAuth)\nRedirect: `{settings.google_oauth_redirect_uri}`\nReminders: `{settings.calendar_reminder_minutes}m`"
         else:
             cal_desc = "⚪ Disabled"
 
         embed.add_field(
-            name="📅 Google Calendar",
-            value=f"{cal_desc}\nAuto-Schedule: `{settings.auto_schedule_calendar}`\nReminders: `{settings.calendar_reminder_minutes}m`",
+            name="📅 Google Calendar Integration",
+            value=cal_desc,
             inline=False
         )
 

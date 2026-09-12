@@ -73,7 +73,8 @@ class CommitmentActionView(discord.ui.View):
                 try:
                     await self.calendar_service.complete_event(
                         event_id=self.commitment.calendar_event_id,
-                        task_title=self.commitment.task_title
+                        task_title=self.commitment.task_title,
+                        discord_user_id=self.commitment.user_id
                     )
                 except Exception:
                     pass
@@ -103,7 +104,8 @@ class CommitmentActionView(discord.ui.View):
                 try:
                     await self.calendar_service.update_event_time(
                         event_id=self.commitment.calendar_event_id,
-                        new_deadline=new_deadline
+                        new_deadline=new_deadline,
+                        discord_user_id=self.commitment.user_id
                     )
                 except Exception:
                     pass
@@ -114,6 +116,25 @@ class CommitmentActionView(discord.ui.View):
             embed=embed,
             view=self
         )
+
+    @discord.ui.button(label="Connect Calendar", style=discord.ButtonStyle.secondary, emoji="🔗", row=1)
+    async def connect_calendar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.calendar_service:
+            await interaction.response.send_message("Google Calendar integration is not active.", ephemeral=True)
+            return
+        try:
+            auth_url = self.calendar_service.get_authorization_url(str(interaction.user.id))
+            link_view = discord.ui.View()
+            link_view.add_item(discord.ui.Button(label="Open Google Sign-In", url=auth_url, emoji="🌐"))
+            await interaction.response.send_message(
+                "🔗 **Connect your personal Google Calendar:**\n"
+                "Click below to authorize your Google account. Your promises will automatically sync to your calendar with notification popups!\n\n"
+                "*(You can also use `/calendar-auth code:<code>` if copy-pasting an authorization code)*",
+                view=link_view,
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Could not generate authorization link: {e}", ephemeral=True)
 
     @discord.ui.button(label="Draft Update", style=discord.ButtonStyle.primary, emoji="📝")
     async def draft_update(self, interaction: discord.Interaction, button: discord.ui.Button):

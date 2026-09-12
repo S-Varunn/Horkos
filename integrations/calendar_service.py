@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import urllib.parse
@@ -6,16 +7,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 from config import settings
+from db.database import Database
 from db.models import Commitment
 
 logger = logging.getLogger("CommitmentRadar.Calendar")
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/userinfo.email"
+]
 
 
 class GoogleCalendarService:
     def __init__(
         self,
+        db: Optional[Database] = None,
         enabled: Optional[bool] = None,
         calendar_id: Optional[str] = None,
         credentials_file: Optional[str] = None,
@@ -23,12 +29,14 @@ class GoogleCalendarService:
         service_account_file: Optional[str] = None,
         reminder_minutes: Optional[List[int]] = None
     ):
+        self.db = db
         self.enabled = settings.google_calendar_enabled if enabled is None else enabled
         self.calendar_id = calendar_id or settings.google_calendar_id
         self.credentials_file = credentials_file or settings.google_credentials_file
         self.token_file = token_file or settings.google_token_file
         self.service_account_file = service_account_file or settings.google_service_account_file
-        
+        self.redirect_uri = settings.google_oauth_redirect_uri
+
         # Parse comma-separated reminders like "30,10"
         if reminder_minutes is not None:
             self.default_reminders = reminder_minutes
@@ -40,18 +48,18 @@ class GoogleCalendarService:
             except Exception:
                 self.default_reminders = [30, 10]
 
-        self.service = None
+        # Service cache keyed by discord_user_id
+        self._user_services: Dict[str, Any] = {}
+        self.global_service = None
         self.is_mock = True
-        self._init_client()
+        self._init_global_fallback()
 
-    def _init_client(self):
-        """Initializes the official Google Calendar API service or sets mock mode."""
+    def _init_global_fallback(self):
+        """Initializes fallback service account or local token.json if present."""
         if not self.enabled:
-            logger.info("Google Calendar integration is disabled via configuration.")
-            self.is_mock = True
             return
 
-        # 1. Try Service Account Authentication
+        # Try Service Account
         if self.service_account_file and os.path.exists(self.service_account_file):
             try:
                 from google.oauth2 import service_account
@@ -60,38 +68,149 @@ class GoogleCalendarService:
                 creds = service_account.Credentials.from_service_account_file(
                     self.service_account_file, scopes=SCOPES
                 )
-                self.service = build("calendar", "v3", credentials=creds)
+                self.global_service = build("calendar", "v3", credentials=creds)
                 self.is_mock = False
-                logger.info(f"Google Calendar connected via Service Account ({self.service_account_file})")
+                logger.info(f"Google Calendar fallback connected via Service Account ({self.service_account_file})")
                 return
             except Exception as e:
                 logger.warning(f"Failed to authenticate with Service Account: {e}")
 
-        # 2. Try User OAuth2 Token / Credentials
-        creds = None
+        # Try local token.json
         if self.token_file and os.path.exists(self.token_file):
             try:
                 from google.oauth2.credentials import Credentials
-                creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
-            except Exception as e:
-                logger.warning(f"Failed to read existing token file {self.token_file}: {e}")
-
-        if creds and creds.valid:
-            try:
                 from googleapiclient.discovery import build
-                self.service = build("calendar", "v3", credentials=creds)
-                self.is_mock = False
-                logger.info("Google Calendar connected via authorized user token.")
-                return
+                creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
+                if creds and creds.valid:
+                    self.global_service = build("calendar", "v3", credentials=creds)
+                    self.is_mock = False
+                    logger.info("Google Calendar fallback connected via token.json.")
+                    return
             except Exception as e:
-                logger.warning(f"Failed to build calendar service with token: {e}")
+                logger.warning(f"Failed to load token.json fallback: {e}")
 
-        # Fallback to Mock/Dry-Run Mode
-        self.is_mock = True
-        logger.info(
-            "Google Calendar API running in simulated/mock mode. "
-            "(To connect live, provide credentials.json or service_account.json)"
+    def get_authorization_url(self, discord_user_id: str) -> str:
+        """Generates a personalized Google OAuth consent URL with state=discord_user_id."""
+        if not os.path.exists(self.credentials_file):
+            raise FileNotFoundError(f"'{self.credentials_file}' not found. Download it from Google Cloud Console.")
+
+        from google_auth_oauthlib.flow import Flow
+        flow = Flow.from_client_secrets_file(
+            self.credentials_file,
+            scopes=SCOPES,
+            redirect_uri=self.redirect_uri
         )
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+            state=discord_user_id
+        )
+        return auth_url
+
+    async def handle_oauth_code(self, code: str, discord_user_id: str) -> Dict[str, Any]:
+        """Exchanges authorization code for credentials and saves to database for this user."""
+        try:
+            from google_auth_oauthlib.flow import Flow
+            from googleapiclient.discovery import build
+
+            flow = Flow.from_client_secrets_file(
+                self.credentials_file,
+                scopes=SCOPES,
+                redirect_uri=self.redirect_uri
+            )
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+
+            # Retrieve user email if accessible
+            email = None
+            try:
+                oauth2_service = build("oauth2", "v2", credentials=creds)
+                user_info = oauth2_service.userinfo().get().execute()
+                email = user_info.get("email")
+            except Exception:
+                pass
+
+            token_json = creds.to_json()
+            if self.db:
+                await self.db.save_user_google_auth(
+                    discord_user_id=discord_user_id,
+                    token_json=token_json,
+                    google_email=email
+                )
+
+            # Invalidate cached service so it rebuilds fresh
+            self._user_services.pop(discord_user_id, None)
+
+            logger.info(f"Successfully linked Google Calendar for Discord user {discord_user_id} ({email or 'no email'})")
+            return {"success": True, "email": email}
+        except Exception as e:
+            logger.error(f"Failed to exchange OAuth code for user {discord_user_id}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def get_service_for_user(self, discord_user_id: Optional[str]) -> Optional[Any]:
+        """Retrieves or builds an authenticated Google Calendar API client for a specific user."""
+        if not self.enabled or not discord_user_id:
+            return self.global_service
+
+        if discord_user_id in self._user_services:
+            return self._user_services[discord_user_id]
+
+        # 1. Look up user in SQLite
+        if self.db:
+            user_auth = await self.db.get_user_google_auth(discord_user_id)
+            if user_auth:
+                try:
+                    from google.oauth2.credentials import Credentials
+                    from google.auth.transport.requests import Request
+                    from googleapiclient.discovery import build
+
+                    token_dict = json.loads(user_auth.token_json)
+                    creds = Credentials.from_authorized_user_info(token_dict, SCOPES)
+
+                    # Refresh if expired
+                    if creds.expired and creds.refresh_token:
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, lambda: creds.refresh(Request()))
+                        await self.db.save_user_google_auth(
+                            discord_user_id=discord_user_id,
+                            token_json=creds.to_json(),
+                            google_email=user_auth.google_email
+                        )
+
+                    service = build("calendar", "v3", credentials=creds)
+                    self._user_services[discord_user_id] = service
+                    return service
+                except Exception as e:
+                    logger.warning(f"Failed to build Google Calendar client for user {discord_user_id}: {e}")
+
+        # 2. Check if local token.json exists (auto-link to this user)
+        if self.token_file and os.path.exists(self.token_file):
+            try:
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+
+                creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
+                if creds and creds.valid:
+                    # Auto-seed database for this user
+                    if self.db:
+                        await self.db.save_user_google_auth(
+                            discord_user_id=discord_user_id,
+                            token_json=creds.to_json()
+                        )
+                    service = build("calendar", "v3", credentials=creds)
+                    self._user_services[discord_user_id] = service
+                    return service
+            except Exception as e:
+                logger.warning(f"Failed to read token.json for user {discord_user_id}: {e}")
+
+        # 3. Fallback to global service account if configured
+        return self.global_service
+
+    async def is_user_connected(self, discord_user_id: str) -> bool:
+        """Checks if a specific Discord user has an active Google Calendar integration."""
+        service = await self.get_service_for_user(discord_user_id)
+        return service is not None
 
     def _generate_web_event_link(
         self,
@@ -119,10 +238,9 @@ class GoogleCalendarService:
         reminder_minutes: Optional[List[int]] = None
     ) -> Dict[str, Any]:
         """
-        Creates an event in Google Calendar with reminder notifications (popups/email).
+        Creates an event in the commitment owner's Google Calendar with their reminder notifications.
         """
         deadline = commitment.deadline_utc
-        # Make naive UTC datetime timezone-aware for formatting
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=timezone.utc)
 
@@ -148,39 +266,35 @@ class GoogleCalendarService:
         )
 
         overrides = [{"method": "popup", "minutes": m} for m in reminders_list]
-        # If any reminder is 30m or more, also add an email notification
         if any(m >= 30 for m in reminders_list):
             overrides.append({"method": "email", "minutes": max(reminders_list)})
 
         event_payload = {
             "summary": event_title,
             "description": description,
-            "start": {
-                "dateTime": start_dt.isoformat(),
-                "timeZone": "UTC"
-            },
-            "end": {
-                "dateTime": end_dt.isoformat(),
-                "timeZone": "UTC"
-            },
-            "reminders": {
-                "useDefault": False,
-                "overrides": overrides
-            },
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": "UTC"},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": "UTC"},
+            "reminders": {"useDefault": False, "overrides": overrides},
             "colorId": "5"  # Yellow/Gold for in-progress tasks
         }
 
-        if not self.is_mock and self.service:
+        # Look up service for this specific user
+        user_service = await self.get_service_for_user(commitment.user_id)
+
+        if user_service:
             try:
                 loop = asyncio.get_running_loop()
                 created_event = await loop.run_in_executor(
                     None,
-                    lambda: self.service.events().insert(
+                    lambda: user_service.events().insert(
                         calendarId=self.calendar_id,
                         body=event_payload
                     ).execute()
                 )
-                logger.info(f"Google Calendar event created successfully: ID {created_event.get('id')}")
+                logger.info(
+                    f"Google Calendar event created on {commitment.user_name}'s calendar: "
+                    f"ID {created_event.get('id')}"
+                )
                 return {
                     "id": created_event.get("id"),
                     "htmlLink": created_event.get("htmlLink"),
@@ -188,9 +302,9 @@ class GoogleCalendarService:
                     "is_mock": False
                 }
             except Exception as e:
-                logger.error(f"Error calling Google Calendar API: {e}", exc_info=True)
+                logger.error(f"Error calling Google Calendar API for user {commitment.user_id}: {e}", exc_info=True)
 
-        # Mock / Simulation Return
+        # Fallback / Unlinked User: Provide simulated 1-click web event template link
         synthetic_id = f"gcal_sim_{commitment.id or int(datetime.now().timestamp())}"
         synthetic_link = self._generate_web_event_link(
             title=event_title,
@@ -198,7 +312,7 @@ class GoogleCalendarService:
             end_time=end_dt,
             description=description
         )
-        logger.info(f"Simulated Google Calendar event scheduled: {synthetic_id}")
+        logger.info(f"Generated 1-click Google Calendar web link for user {commitment.user_name} ({synthetic_id})")
         return {
             "id": synthetic_id,
             "htmlLink": synthetic_link,
@@ -210,9 +324,10 @@ class GoogleCalendarService:
         self,
         event_id: str,
         new_deadline: datetime,
+        discord_user_id: Optional[str] = None,
         duration_minutes: int = 30
     ) -> Optional[Dict[str, Any]]:
-        """Updates event start and end time when user pushes or changes deadline."""
+        """Updates event start and end time in user's calendar when pushing deadline."""
         if not event_id:
             return None
 
@@ -220,13 +335,14 @@ class GoogleCalendarService:
             new_deadline = new_deadline.replace(tzinfo=timezone.utc)
 
         new_start = new_deadline - timedelta(minutes=duration_minutes)
+        user_service = await self.get_service_for_user(discord_user_id)
 
-        if not self.is_mock and self.service:
+        if user_service and not event_id.startswith("gcal_sim_"):
             try:
                 loop = asyncio.get_running_loop()
                 event = await loop.run_in_executor(
                     None,
-                    lambda: self.service.events().get(
+                    lambda: user_service.events().get(
                         calendarId=self.calendar_id,
                         eventId=event_id
                     ).execute()
@@ -236,7 +352,7 @@ class GoogleCalendarService:
 
                 updated_event = await loop.run_in_executor(
                     None,
-                    lambda: self.service.events().update(
+                    lambda: user_service.events().update(
                         calendarId=self.calendar_id,
                         eventId=event_id,
                         body=event
@@ -248,24 +364,26 @@ class GoogleCalendarService:
                 logger.error(f"Failed to update Google Calendar event {event_id}: {e}")
                 return None
 
-        logger.info(f"Simulated Google Calendar event {event_id} deadline updated to {new_deadline}")
         return {"id": event_id, "status": "updated", "is_mock": True}
 
     async def complete_event(
         self,
         event_id: str,
-        task_title: Optional[str] = None
+        task_title: Optional[str] = None,
+        discord_user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Marks event completed on Google Calendar (changes color to Green and prepends [✅ Done])."""
+        """Marks event completed in user's calendar (changes color to Green and prepends [✅ Done])."""
         if not event_id:
             return None
 
-        if not self.is_mock and self.service:
+        user_service = await self.get_service_for_user(discord_user_id)
+
+        if user_service and not event_id.startswith("gcal_sim_"):
             try:
                 loop = asyncio.get_running_loop()
                 event = await loop.run_in_executor(
                     None,
-                    lambda: self.service.events().get(
+                    lambda: user_service.events().get(
                         calendarId=self.calendar_id,
                         eventId=event_id
                     ).execute()
@@ -277,7 +395,7 @@ class GoogleCalendarService:
 
                 updated_event = await loop.run_in_executor(
                     None,
-                    lambda: self.service.events().update(
+                    lambda: user_service.events().update(
                         calendarId=self.calendar_id,
                         eventId=event_id,
                         body=event
@@ -289,5 +407,4 @@ class GoogleCalendarService:
                 logger.error(f"Failed to mark Google Calendar event {event_id} completed: {e}")
                 return None
 
-        logger.info(f"Simulated Google Calendar event {event_id} marked as completed.")
         return {"id": event_id, "status": "completed", "is_mock": True}

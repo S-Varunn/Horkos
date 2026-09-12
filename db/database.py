@@ -1,7 +1,7 @@
 import aiosqlite
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from db.models import Commitment, CommitmentStatus, utc_now
+from db.models import Commitment, CommitmentStatus, UserGoogleAuth, utc_now
 
 
 class Database:
@@ -32,6 +32,17 @@ class Database:
                     updated_at TEXT NOT NULL
                 )
             """)
+            # Multi-User Google OAuth Token Table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_google_auth (
+                    discord_user_id TEXT PRIMARY KEY,
+                    google_email TEXT,
+                    token_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
             # Migration check for existing databases
             async with db.execute("PRAGMA table_info(commitments)") as cursor:
                 cols = [row[1] for row in await cursor.fetchall()]
@@ -165,6 +176,55 @@ class Database:
                 SET calendar_event_id = ?, calendar_event_link = ?, updated_at = ?
                 WHERE id = ?
             """, (event_id, event_link, now, commitment_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def save_user_google_auth(
+        self,
+        discord_user_id: str,
+        token_json: str,
+        google_email: Optional[str] = None
+    ) -> bool:
+        """Saves or updates OAuth tokens for a specific Discord user."""
+        now = utc_now().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO user_google_auth (discord_user_id, google_email, token_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(discord_user_id) DO UPDATE SET
+                    google_email = excluded.google_email,
+                    token_json = excluded.token_json,
+                    updated_at = excluded.updated_at
+            """, (discord_user_id, google_email, token_json, now, now))
+            await db.commit()
+            return True
+
+    async def get_user_google_auth(self, discord_user_id: str) -> Optional[UserGoogleAuth]:
+        """Retrieves stored Google OAuth credentials for a specific Discord user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM user_google_auth WHERE discord_user_id = ?",
+                (discord_user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return UserGoogleAuth(
+                        discord_user_id=row["discord_user_id"],
+                        google_email=row["google_email"],
+                        token_json=row["token_json"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"])
+                    )
+        return None
+
+    async def delete_user_google_auth(self, discord_user_id: str) -> bool:
+        """Removes stored Google OAuth credentials for a user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM user_google_auth WHERE discord_user_id = ?",
+                (discord_user_id,)
+            )
             await db.commit()
             return cursor.rowcount > 0
 

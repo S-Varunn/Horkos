@@ -37,3 +37,11 @@ class Commitment(BaseModel):
     calendar_event_link: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class UserGoogleAuth(BaseModel):
+    discord_user_id: str
+    google_email: Optional[str] = None
+    token_json: str
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
