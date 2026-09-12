@@ -14,6 +14,8 @@ from pipeline.filter import is_commitment_candidate
     ("Let me check the logs and get back to you", True),
     ("Will deploy to staging by 5pm", True),
     ("Reviewing the pull request by tomorrow", True),
+    ("I can host a volleyball match at 6pm today", True),
+    ("Will organize the team sync around 3pm", True),
 
     # Negative: Casual chatter and non-commitments
     ("lol that's awesome", False),

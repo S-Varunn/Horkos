@@ -11,7 +11,7 @@ INTENT_PATTERNS = [
 
 # Temporal indicators indicating a timeframe or deadline
 TEMPORAL_PATTERNS = [
-    r"\b(by|before|until|after)\s+(eod|end of day|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|noon|lunch|\d{1,2}(:\d{2})?\s*(am|pm)?)\b",
+    r"\b(by|before|until|after|at|around)\s+(eod|end of day|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|noon|lunch|\d{1,2}(:\d{2})?\s*(am|pm)?)\b",
     r"\b(in\s+\d+\s*(mins?|minutes?|hours?|hrs?|days?))\b",
     r"\b(later (today|tonight|this afternoon|this evening|after lunch))\b",
     r"\b(this (afternoon|evening|weekend))\b",
@@ -20,7 +20,7 @@ TEMPORAL_PATTERNS = [
 
 # Action verbs commonly tied to task delivery (including gerunds and common multi-word verbs)
 ACTION_VERBS = [
-    r"\b(send|sending|share|sharing|upload|uploading|review|reviewing|push|pushing|deploy|deploying|fix|fixing|write|writing|submit|submitting|deliver|delivering|email|emailing|forward|ping|pinging|create|creating|update|updating|draft|drafting|merge|merging|check|checking|look into|get back|follow up)\b"
+    r"\b(send|sending|share|sharing|upload|uploading|review|reviewing|push|pushing|deploy|deploying|fix|fixing|write|writing|submit|submitting|deliver|delivering|email|emailing|forward|ping|pinging|create|creating|update|updating|draft|drafting|merge|merging|check|checking|look into|get back|follow up|host|hosting|organize|organizing|schedule|scheduling)\b"
 ]
 
 _INTENT_REGEX = re.compile("|".join(INTENT_PATTERNS), re.IGNORECASE)
