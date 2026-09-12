@@ -34,6 +34,49 @@ class EventsCog(commands.Cog):
         if message.author.bot:
             return
 
+        # Text command fallbacks (in case slash commands haven't refreshed in Discord client yet)
+        content_stripped = message.content.strip()
+        lower_content = content_stripped.lower()
+
+        if lower_content in ("/calendar-connect", "!calendar-connect", "!connect", "/connect"):
+            if self.calendar_service and self.calendar_service.enabled:
+                auth_url = self.calendar_service.get_authorization_url(str(message.author.id))
+                view = discord.ui.View()
+                view.add_item(discord.ui.Button(label="Sign In with Google", url=auth_url, emoji="🌐"))
+                await message.reply(
+                    f"🔗 **Link your personal Google Calendar, {message.author.display_name}:**\n"
+                    "1. Click the button below to sign in with Google.\n"
+                    "2. Grant calendar permissions to Commitment Radar.\n"
+                    "3. Once linked, commitments you make will automatically sync to your personal calendar!\n\n"
+                    "*(Or copy the authorization code from Google and type: `!calendar-auth <code>`)*",
+                    view=view
+                )
+            else:
+                await message.reply("❌ Google Calendar integration is disabled.")
+            return
+
+        if lower_content in ("/calendar-status", "!calendar-status", "!status"):
+            user_auth = await self.db.get_user_google_auth(str(message.author.id))
+            if user_auth:
+                await message.reply(f"🟢 **Google Calendar Connected** ({user_auth.google_email})")
+            else:
+                await message.reply("🟡 **Google Calendar Not Connected**\nType `/calendar-connect` or `!calendar-connect` to link your calendar.")
+            return
+
+        if lower_content.startswith(("/calendar-auth", "!calendar-auth")):
+            parts = content_stripped.split(maxsplit=1)
+            if len(parts) > 1 and self.calendar_service:
+                code = parts[1].strip()
+                result = await self.calendar_service.handle_oauth_code(code, str(message.author.id))
+                if result.get("success"):
+                    email_info = f" ({result['email']})" if result.get("email") else ""
+                    await message.reply(f"✅ **Google Calendar Connected!**{email_info}")
+                else:
+                    await message.reply(f"❌ Failed to connect Google Calendar: {result.get('error', 'Unknown error')}")
+            else:
+                await message.reply("Usage: `!calendar-auth <authorization_code>`")
+            return
+
         # Stage 1: Fast Heuristic Pre-filter (0 tokens, 0ms latency)
         is_candidate, reason = is_commitment_candidate(message.content)
         if not is_candidate:
