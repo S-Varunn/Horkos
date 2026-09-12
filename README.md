@@ -276,3 +276,5 @@ Run the MCP server over standard I/O:
 ```bash
 ./venv/bin/python integrations/mcp_server.py
 ```
+
+Built and working today: ambient Discord bot, stall-detection, consent-based chime-in, commitment extraction with calendar drafting. Next: multi-platform, live Places integration, richer memory.
