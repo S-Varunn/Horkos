@@ -20,7 +20,7 @@ Someone drops a question: *"Where are we eating tonight?"*
 
 One friend suggests Mexican. Another says they could do sushi. Then work pings someone, somebody gets distracted, and the chat goes dead for twenty minutes. Everyone gets hungry, nobody makes a choice, and the plan slowly dissolves into decision fatigue.
 
-Our agent watches that unfold without interrupting. If the conversation flows naturally and people agree, it leaves everyone alone. But if the thread dies out and nobody replies for fifteen seconds, the bot steps in. It remembers what people were leaning toward, surfaces high-rated spots nearby matching the vibe, and offers quick one-click options so the group can make a decision and move on. If the group had already settled on a plan earlier that afternoon, it even reminds everyone: *"You all agreed on tacos thirty minutes ago, here is the spot."*
+Our agent watches that unfold without interrupting. If the conversation flows naturally and people agree, it leaves everyone alone. But if the thread dies out and nobody replies for a configurable silence window (by default 15 seconds, adjustable to whatever timeframe fits your group), the bot steps in. It remembers what people were leaning toward, surfaces high-rated spots nearby matching the vibe, and offers quick one-click options so the group can make a decision and move on. If the group had already settled on a plan earlier that afternoon, it even reminds everyone: *"You all agreed on tacos thirty minutes ago, here is the spot."*
 
 ### Beyond Dinner Plans: Commitment Tracking
 The second half of our agent solves the biggest black hole in every chat: casual promises.
@@ -43,7 +43,7 @@ By meeting groups where they already talk, listening for conversational context,
 
 ## Key Features
 
-- **Silence-Aware Dining and Plan Rescuer:** Listens for meal and hangout dilemmas. If conversation dies down for 15 seconds without consensus, it intervenes with cuisine buttons, interactive recommendations, and Yelp/Google Maps navigation links. If a consensus was already reached in the last 4 hours or recent chat, it instantly brings it back to avoid looping debates.
+- **Silence-Aware Dining and Plan Rescuer:** Listens for meal and hangout dilemmas. If conversation dies down for a configurable silence duration without consensus (default: 15 seconds, fully customizable in settings), it intervenes with cuisine buttons, interactive recommendations, and Yelp/Google Maps navigation links. If a consensus was already reached in the last 4 hours or recent chat, it instantly brings it back to avoid looping debates.
 - **Context and Pronoun Disambiguation:** Real people say *"I'll finish that by five"* or *"I can take care of it tonight"*. The agent inspects the preceding messages in the channel to figure out what "that" or "it" refers to, ensuring calendar events get accurate, descriptive titles.
 - **Auto-Fulfillment Detection:** When you later drop a link, attach a file, or say *"just deployed it"*, the agent evaluates whether your commitment was satisfied, marks it complete, updates your calendar, and adds an acknowledgment reaction.
 - **Personal Google Calendar Integration:** Each user links their personal Google Calendar via OAuth 2.0. Events sync directly to their private calendar rather than an annoying shared spam board.
@@ -86,11 +86,12 @@ Upcoming integrations on our roadmap:
                          ▼                               ▼
        ┌──────────────────────────────────┐    ┌──────────────────────────────────┐
        │     bot/cogs/events.py           │    │       pipeline/filter.py         │
-       │  Silence Timeout Engine (15s)    │    │ Preceding Context Disambiguation │
+       │  Silence Timeout Engine          │    │ Preceding Context Disambiguation │
+       │  (Configurable: default 15s)     │    │                                  │
        └───────────────┬──────────────────┘    └─────────────────┬────────────────┘
                        │                                         │
         (Human speaks -> Timer cancelled)                        ▼
-        (15s silence  -> AI Suggestion)        ┌──────────────────────────────────┐
+        (Timeout reached -> AI Suggestion)     ┌──────────────────────────────────┐
                        │                       │        llm/extractor.py          │
                        ▼                       │ Hermes 3 Structured Extractor    │
        ┌──────────────────────────────────┐    └─────────────────┬────────────────┘
@@ -119,7 +120,7 @@ To keep bot response times instant and reduce LLM token costs by over 90%, all m
 When someone asks an open-ended meal question (*"What's the dinner plan?"*, *"Where should we eat?"*), the bot:
 1. Searches the last 3 minutes of chat history for any agreed-upon decision.
 2. Checks the database for any resolved plan in that channel from the past 4 hours. If found, it immediately replies with the accepted plan to stop repetitive debate.
-3. If undecided, it launches a 15-second countdown timer. If any human speaks in the channel during that window, the timer is aborted immediately. If silence persists for 15 seconds, the bot posts an interactive cuisine picker with direct restaurant suggestions.
+3. If undecided, it launches a configurable silence timer (`DINING_INQUIRY_TIMEOUT_SECONDS`, default 15s). If any human speaks in the channel during that window, the timer is immediately aborted because normal human conversation is continuing. If silence persists through the full timeout, the bot steps in with an interactive cuisine picker and direct restaurant suggestions.
 
 ### 3. Context & Pronoun Disambiguation
 When users say ambiguous phrases like *"I'll review that tonight"*, the engine pulls the preceding 6 messages from the channel history and passes them to Hermes as conversational context. The model resolves the referent (e.g., identifying that "that" is the pull request posted two messages earlier) and generates a concrete calendar title.
@@ -230,6 +231,7 @@ DATABASE_PATH=commitment_radar.db
 DEFAULT_TIMEZONE=America/New_York
 ALERT_ADVANCE_MINUTES=10
 AUTO_SCHEDULE_CALENDAR=true
+DINING_INQUIRY_TIMEOUT_SECONDS=15
 ```
 
 ### 4. Run the Automated Tests
