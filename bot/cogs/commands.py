@@ -1,4 +1,5 @@
 import logging
+import json
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -10,6 +11,7 @@ from llm.extractor import CommitmentExtractor
 from bot.ui.embeds import create_commitments_list_embed, create_commitment_embed
 from bot.ui.views import CommitmentActionView
 from integrations.calendar_service import GoogleCalendarService
+from integrations.mcp_server import format_commitments_markdown, format_commitments_todoist
 from config import settings
 
 logger = logging.getLogger("CommitmentRadar.Commands")
@@ -254,6 +256,41 @@ class CommandsCog(commands.Cog):
 
         embed.set_footer(text="Commitment Radar • Hackathon Edition")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="export", description="Export your active commitments in Markdown, JSON, or Todoist format")
+    @app_commands.describe(format="Export format (markdown, json, or todoist)")
+    @app_commands.choices(format=[
+        app_commands.Choice(name="Markdown Checklist", value="markdown"),
+        app_commands.Choice(name="Todoist API Payload", value="todoist"),
+        app_commands.Choice(name="Raw JSON", value="json")
+    ])
+    async def export_commitments(self, interaction: discord.Interaction, format: str = "markdown"):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        commitments = await self.db.get_active_commitments_for_user(user_id)
+
+        if not commitments:
+            await interaction.followup.send("ℹ️ You have no active commitments to export.", ephemeral=True)
+            return
+
+        if format == "markdown":
+            md_content = format_commitments_markdown(commitments, title=f"Commitments for {interaction.user.display_name}")
+            await interaction.followup.send(f"```markdown\n{md_content}\n```", ephemeral=True)
+        elif format == "todoist":
+            tasks = format_commitments_todoist(commitments)
+            await interaction.followup.send(f"```json\n{json.dumps(tasks, indent=2)}\n```", ephemeral=True)
+        else:
+            data = [
+                {
+                    "id": c.id,
+                    "task": c.task_title,
+                    "recipient": c.recipient,
+                    "deadline_utc": c.deadline_utc.isoformat() if c.deadline_utc else None,
+                    "calendar_link": c.calendar_event_link
+                }
+                for c in commitments
+            ]
+            await interaction.followup.send(f"```json\n{json.dumps(data, indent=2)}\n```", ephemeral=True)
 
 
 async def setup(

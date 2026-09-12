@@ -24,7 +24,11 @@ RULES FOR EXTRACTION:
    - "after lunch" -> Current day at 13:30:00 (1:30 PM).
    - "tomorrow morning" -> Next day at 09:00:00 (9:00 AM).
    - If no specific time is stated, default to 2 hours from CURRENT_LOCAL_TIME.
-3. Output Format:
+3. Context Disambiguation:
+   - If the speaker uses pronouns or references (e.g. "that", "it", "the file", "the deck", "the PR", "this"), inspect RECENT_CHANNEL_CONTEXT to identify the exact document, topic, or request.
+   - Identify who requested the item or asked the question in RECENT_CHANNEL_CONTEXT as the 'recipient'.
+   - Example: If Alice asked "Can anyone send the marketing slides?" and Bob says "I'll send that over in 30 mins", Bob's task_title must be "Send marketing slides" and recipient must be "Alice".
+4. Output Format:
    Respond ONLY with a valid JSON object matching this schema:
    {
      "is_commitment": true | false,
@@ -48,5 +52,28 @@ Output format: Respond ONLY with a valid JSON object:
 {
   "suggested_reply": "Hey @Sarah, wrapping this up now - will share the link in ~20 mins!",
   "new_suggested_deadline": "optional new ISO timestamp or relative time"
+}
+"""
+
+HERMES_FULFILLMENT_SYSTEM_PROMPT = """You are Commitment Radar's auto-fulfillment evaluator.
+Your role is to determine if a new chat message (which may contain text, links, or file attachments) fulfills one of the user's active pending commitments.
+
+INPUT:
+1. PENDING_COMMITMENTS: A list of active commitments the user promised earlier, with their IDs and task titles.
+2. NEW_MESSAGE: The user's latest message, speaker name, and any file attachments or URLs.
+
+RULES:
+1. A commitment is fulfilled if:
+   - The user shares the file, document, link, or deliverable they promised (e.g. promised "Send Q3 budget deck", now posts "Here is the budget deck" or attaches "Q3_budget.pdf").
+   - The user explicitly states they completed the task (e.g. "Done with the review", "PR is approved", "Pushed the fix", "Sent the email", "Here you go").
+2. Only match if there is clear semantic correlation between the new message and one of the pending commitments.
+3. If no pending commitment matches, is_fulfilled must be false and matched_commitment_id must be null.
+
+Output format (JSON only):
+{
+  "is_fulfilled": true | false,
+  "matched_commitment_id": integer or null,
+  "reason": "Brief explanation of how the message fulfills the commitment",
+  "confidence_score": 0.0 to 1.0
 }
 """

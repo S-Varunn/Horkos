@@ -152,6 +152,6 @@ Fill in:
 
 ## 🔮 Roadmap (Phase 2: Killer Features)
 
-- [ ] **🌟 Auto-Fulfillment Detection**: When a user drops a file or follow-up (*"Here's the PDF"*) in the same channel, the agent automatically detects fulfillment and marks the commitment resolved without bothering the user.
-- [ ] **🌟 Multi-step Context Disambiguation**: Autonomously fetch prior channel history to resolve ambiguous pronouns (*"I'll send that over soon"* -> fetches context to identify the file).
-- [ ] **🌟 Bi-directional Sync**: One-click webhook export to Google Calendar, Todoist, or Notion via Model Context Protocol (MCP).
+- [x] **🌟 Auto-Fulfillment Detection**: When a user drops a file, link, or follow-up (*"Here's the PDF"*, *"Done reviewing"*) in the channel, the agent automatically detects fulfillment via Hermes LLM, marks the commitment resolved, updates the Google Calendar event (`[✅ Done]`), and reacts with `✅` without bothering the user.
+- [x] **🌟 Multi-step Context Disambiguation**: Autonomously inspects preceding channel history to resolve ambiguous pronouns (*"I'll send that over soon"* -> fetches context to identify the file/request and who asked for it).
+- [x] **🌟 Bi-directional Sync & MCP Integration**: Real-time outgoing webhook dispatching (`commitment.created`, `commitment.completed`), native Model Context Protocol (MCP) JSON-RPC 2.0 server (`integrations/mcp_server.py`) for AI agents/Claude/Cursor, and `/export format:[markdown|todoist|json]` command.

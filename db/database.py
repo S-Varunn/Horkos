@@ -170,6 +170,18 @@ class Database:
                 rows = await cursor.fetchall()
                 return [self._row_to_commitment(r) for r in rows]
 
+    async def get_all_active_commitments(self) -> List[Commitment]:
+        """Gets all non-completed/non-cancelled commitments across all users."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM commitments
+                WHERE status IN ('PENDING', 'NOTIFIED', 'SNOOZED')
+                ORDER BY deadline_utc ASC
+            """) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_commitment(r) for r in rows]
+
     async def update_calendar_event(self, commitment_id: int, event_id: str, event_link: str) -> bool:
         """Associates a Google Calendar event ID and link with a commitment."""
         now = utc_now().isoformat()
