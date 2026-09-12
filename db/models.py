@@ -35,3 +35,26 @@ class Commitment(BaseModel):
     status: CommitmentStatus = CommitmentStatus.PENDING
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class DiningInquiryStatus(str, Enum):
+    WAITING = "WAITING"
+    ANSWERED = "ANSWERED"
+    TIMED_OUT = "TIMED_OUT"
+    RESOLVED = "RESOLVED"
+
+
+class DiningInquiry(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[int] = None
+    channel_id: str
+    message_id: str
+    user_id: str
+    user_name: str
+    guild_id: Optional[str] = None
+    raw_text: str
+    status: DiningInquiryStatus = DiningInquiryStatus.WAITING
+    chosen_cuisine: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
