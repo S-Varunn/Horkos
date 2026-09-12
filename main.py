@@ -12,6 +12,7 @@ from scheduler.service import AlertScheduler
 from bot.client import CommitmentRadarBot
 from bot.ui.embeds import create_commitment_embed
 from bot.ui.views import CommitmentActionView
+from integrations.calendar_service import GoogleCalendarService
 
 # Setup structured logging
 logging.basicConfig(
@@ -38,10 +39,14 @@ async def main():
     logger.info(f"Initializing LLM Extractor (Model: {settings.llm_model})...")
     extractor = CommitmentExtractor()
 
-    # 3. Initialize Discord Bot
-    bot = CommitmentRadarBot(db=db, extractor=extractor)
+    # 3. Initialize Google Calendar Service
+    logger.info("Initializing Google Calendar Service...")
+    calendar_service = GoogleCalendarService()
 
-    # 4. Define alert callback when deadline is within advance window (e.g. 30m)
+    # 4. Initialize Discord Bot
+    bot = CommitmentRadarBot(db=db, extractor=extractor, calendar_service=calendar_service)
+
+    # 5. Define alert callback when deadline is within advance window (e.g. 30m)
     async def send_deadline_alert(commitment: Commitment):
         logger.info(f"Triggering proactive alert for commitment #{commitment.id}")
         try:
@@ -54,7 +59,7 @@ async def main():
                     return
 
             embed = create_commitment_embed(commitment, is_alert=True)
-            view = CommitmentActionView(commitment, db, extractor)
+            view = CommitmentActionView(commitment, db, extractor, calendar_service)
             
             await channel.send(
                 content=f"🔔 <@{commitment.user_id}> Gentle reminder regarding your commitment:",

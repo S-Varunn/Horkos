@@ -33,5 +33,7 @@ class Commitment(BaseModel):
     relative_deadline_text: str = ""
     context_snippet: Optional[str] = None
     status: CommitmentStatus = CommitmentStatus.PENDING
+    calendar_event_id: Optional[str] = None
+    calendar_event_link: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

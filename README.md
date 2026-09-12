@@ -81,19 +81,25 @@ hackathon/
 ├── pipeline/                    # Traffic Ingestion & Filtering
 │   └── filter.py                # 2-stage heuristic pre-filter (saves 90% API tokens)
 │
+├── integrations/                # External Services & APIs
+│   └── calendar_service.py      # Google Calendar API with reminders & auto-scheduling
+│
 ├── scheduler/                   # Temporal Alert Engine
 │   └── service.py               # APScheduler async background task
 │
 ├── bot/                         # Discord Interface Layer
 │   ├── client.py                # Discord bot client & intents
 │   ├── ui/
-│   │   ├── embeds.py            # Rich Discord embed formatters
-│   │   └── views.py             # Interactive buttons & modals
+│   │   ├── embeds.py            # Rich Discord embed formatters (with Calendar links)
+│   │   └── views.py             # Interactive buttons & modals (Syncs with Calendar)
 │   └── cogs/
-│       ├── events.py            # on_message listener & event routing
-│       └── commands.py          # Slash commands (/commitments, /radar-status)
+│       ├── events.py            # on_message listener & auto-scheduling
+│       └── commands.py          # Slash commands (/commitments, /schedule, /radar-status)
 │
-└── tests/                       # Automated Test Suite (27 passing tests)
+├── simulate.py                  # Interactive CLI simulator for instant local testing
+│
+└── tests/                       # Automated Test Suite (31 passing tests)
+    ├── test_calendar.py         # Google Calendar service, mock mode & sync tests
     ├── test_filter.py           # Pre-filter heuristic verification
     ├── test_db.py               # Async SQLite database testing
     ├── test_extractor.py        # LLM parsing with mock client

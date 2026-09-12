@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     )
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_model: str = Field(
-        default="nousresearch/hermes-3-llama-3.1-8b:free",
+        default="nousresearch/hermes-3-llama-3.1-70b",
         alias="LLM_MODEL"
     )
 
@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", alias="DEFAULT_TIMEZONE")
     alert_advance_minutes: int = Field(default=30, alias="ALERT_ADVANCE_MINUTES")
     check_interval_seconds: int = Field(default=30, alias="CHECK_INTERVAL_SECONDS")
+
+    # Google Calendar Settings
+    google_calendar_enabled: bool = Field(default=True, alias="GOOGLE_CALENDAR_ENABLED")
+    google_credentials_file: str = Field(default="credentials.json", alias="GOOGLE_CREDENTIALS_FILE")
+    google_token_file: str = Field(default="token.json", alias="GOOGLE_TOKEN_FILE")
+    google_service_account_file: str = Field(default="", alias="GOOGLE_SERVICE_ACCOUNT_FILE")
+    google_calendar_id: str = Field(default="primary", alias="GOOGLE_CALENDAR_ID")
+    auto_schedule_calendar: bool = Field(default=True, alias="AUTO_SCHEDULE_CALENDAR")
+    calendar_reminder_minutes: str = Field(default="30,10", alias="CALENDAR_REMINDER_MINUTES")
 
 
 settings = Settings()

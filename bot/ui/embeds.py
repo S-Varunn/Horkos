@@ -51,6 +51,13 @@ def create_commitment_embed(commitment: Commitment, is_alert: bool = False) -> d
     if commitment.context_snippet:
         embed.add_field(name="Context", value=commitment.context_snippet[:200], inline=False)
 
+    if commitment.calendar_event_link:
+        embed.add_field(
+            name="📅 Google Calendar",
+            value=f"[Open in Calendar]({commitment.calendar_event_link}) • Reminders active",
+            inline=True
+        )
+
     embed.set_footer(text=f"Commitment Radar ID: #{commitment.id} • Click below to resolve or update")
     return embed
 

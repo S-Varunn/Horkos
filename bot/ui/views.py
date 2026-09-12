@@ -6,6 +6,7 @@ from db.database import Database
 from db.models import Commitment, CommitmentStatus
 from llm.extractor import CommitmentExtractor
 from bot.ui.embeds import create_commitment_embed, create_resolution_embed
+from integrations.calendar_service import GoogleCalendarService
 
 
 class DraftUpdateModal(discord.ui.Modal, title="Draft Status Update"):
@@ -36,12 +37,25 @@ class CommitmentActionView(discord.ui.View):
         commitment: Commitment,
         db: Database,
         extractor: CommitmentExtractor,
+        calendar_service: Optional[GoogleCalendarService] = None,
         timeout: Optional[float] = 86400  # 24 hours
     ):
         super().__init__(timeout=timeout)
         self.commitment = commitment
         self.db = db
         self.extractor = extractor
+        self.calendar_service = calendar_service
+
+        # If a Google Calendar event link exists, add a direct link button
+        if self.commitment.calendar_event_link:
+            self.add_item(
+                discord.ui.Button(
+                    label="Calendar",
+                    url=self.commitment.calendar_event_link,
+                    emoji="📅",
+                    row=1
+                )
+            )
 
     @discord.ui.button(label="Mark Done", style=discord.ButtonStyle.success, emoji="✅")
     async def mark_done(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -54,9 +68,20 @@ class CommitmentActionView(discord.ui.View):
             await self.db.update_status(self.commitment.id, CommitmentStatus.COMPLETED)
             self.commitment.status = CommitmentStatus.COMPLETED
 
+            # Sync with Google Calendar
+            if self.calendar_service and self.commitment.calendar_event_id:
+                try:
+                    await self.calendar_service.complete_event(
+                        event_id=self.commitment.calendar_event_id,
+                        task_title=self.commitment.task_title
+                    )
+                except Exception:
+                    pass
+
         # Disable buttons
         for item in self.children:
-            item.disabled = True
+            if hasattr(item, "disabled"):
+                item.disabled = True
 
         embed = create_resolution_embed(self.commitment, "Completed")
         await interaction.response.edit_message(embed=embed, view=self)
@@ -72,6 +97,16 @@ class CommitmentActionView(discord.ui.View):
             await self.db.update_deadline(self.commitment.id, new_deadline)
             self.commitment.deadline_utc = new_deadline
             self.commitment.status = CommitmentStatus.PENDING
+
+            # Sync updated deadline to Google Calendar
+            if self.calendar_service and self.commitment.calendar_event_id:
+                try:
+                    await self.calendar_service.update_event_time(
+                        event_id=self.commitment.calendar_event_id,
+                        new_deadline=new_deadline
+                    )
+                except Exception:
+                    pass
 
         embed = create_commitment_embed(self.commitment, is_alert=False)
         await interaction.response.edit_message(

@@ -26,10 +26,20 @@ class Database:
                     relative_deadline_text TEXT,
                     context_snippet TEXT,
                     status TEXT NOT NULL DEFAULT 'PENDING',
+                    calendar_event_id TEXT,
+                    calendar_event_link TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
             """)
+            # Migration check for existing databases
+            async with db.execute("PRAGMA table_info(commitments)") as cursor:
+                cols = [row[1] for row in await cursor.fetchall()]
+                if "calendar_event_id" not in cols:
+                    await db.execute("ALTER TABLE commitments ADD COLUMN calendar_event_id TEXT")
+                if "calendar_event_link" not in cols:
+                    await db.execute("ALTER TABLE commitments ADD COLUMN calendar_event_link TEXT")
+
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_commitments_status_deadline 
                 ON commitments (status, deadline_utc)
@@ -48,8 +58,9 @@ class Database:
                     user_id, user_name, channel_id, guild_id, message_id,
                     raw_text, task_title, recipient, deadline_utc,
                     relative_deadline_text, context_snippet, status,
+                    calendar_event_id, calendar_event_link,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 commitment.user_id,
                 commitment.user_name,
@@ -63,6 +74,8 @@ class Database:
                 commitment.relative_deadline_text,
                 commitment.context_snippet,
                 commitment.status.value if hasattr(commitment.status, 'value') else commitment.status,
+                commitment.calendar_event_id,
+                commitment.calendar_event_link,
                 commitment.created_at.isoformat(),
                 commitment.updated_at.isoformat()
             ))
@@ -143,7 +156,24 @@ class Database:
                 rows = await cursor.fetchall()
                 return [self._row_to_commitment(r) for r in rows]
 
+    async def update_calendar_event(self, commitment_id: int, event_id: str, event_link: str) -> bool:
+        """Associates a Google Calendar event ID and link with a commitment."""
+        now = utc_now().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                UPDATE commitments
+                SET calendar_event_id = ?, calendar_event_link = ?, updated_at = ?
+                WHERE id = ?
+            """, (event_id, event_link, now, commitment_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
     def _row_to_commitment(self, row: aiosqlite.Row) -> Commitment:
+        # Check if keys exist in row for backward-compatibility with custom queries
+        keys = row.keys() if hasattr(row, 'keys') else []
+        cal_id = row["calendar_event_id"] if "calendar_event_id" in keys else None
+        cal_link = row["calendar_event_link"] if "calendar_event_link" in keys else None
+
         return Commitment(
             id=row["id"],
             user_id=row["user_id"],
@@ -158,6 +188,8 @@ class Database:
             relative_deadline_text=row["relative_deadline_text"] or "",
             context_snippet=row["context_snippet"],
             status=CommitmentStatus(row["status"]),
+            calendar_event_id=cal_id,
+            calendar_event_link=cal_link,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"])
         )

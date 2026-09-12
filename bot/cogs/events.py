@@ -9,15 +9,24 @@ from llm.extractor import CommitmentExtractor
 from pipeline.filter import is_commitment_candidate
 from bot.ui.embeds import create_commitment_embed
 from bot.ui.views import CommitmentActionView
+from integrations.calendar_service import GoogleCalendarService
+from config import settings
 
 logger = logging.getLogger("CommitmentRadar.Events")
 
 
 class EventsCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, db: Database, extractor: CommitmentExtractor):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        db: Database,
+        extractor: CommitmentExtractor,
+        calendar_service: Optional[GoogleCalendarService] = None
+    ):
         self.bot = bot
         self.db = db
         self.extractor = extractor
+        self.calendar_service = calendar_service
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -49,6 +58,31 @@ class EventsCog(commands.Cog):
             # Make naive UTC datetime for sqlite consistency
             deadline_dt = deadline_dt.replace(tzinfo=None)
 
+            # Auto-schedule to Google Calendar if enabled
+            cal_id = None
+            cal_link = None
+            if self.calendar_service and settings.auto_schedule_calendar:
+                try:
+                    cal_res = await self.calendar_service.schedule_commitment_event(
+                        commitment=Commitment(
+                            user_id=str(message.author.id),
+                            user_name=message.author.display_name,
+                            channel_id=str(message.channel.id),
+                            message_id=str(message.id),
+                            raw_text=message.content,
+                            task_title=extracted.task_title,
+                            recipient=extracted.recipient,
+                            deadline_utc=deadline_dt,
+                            relative_deadline_text=extracted.relative_deadline_text,
+                            context_snippet=extracted.context_snippet
+                        )
+                    )
+                    cal_id = cal_res.get("id")
+                    cal_link = cal_res.get("htmlLink")
+                    logger.info(f"Google Calendar event created: {cal_id}")
+                except Exception as ce:
+                    logger.warning(f"Could not auto-schedule to Google Calendar: {ce}")
+
             # Persist to database
             commitment = Commitment(
                 user_id=str(message.author.id),
@@ -62,7 +96,9 @@ class EventsCog(commands.Cog):
                 deadline_utc=deadline_dt,
                 relative_deadline_text=extracted.relative_deadline_text,
                 context_snippet=extracted.context_snippet,
-                status=CommitmentStatus.PENDING
+                status=CommitmentStatus.PENDING,
+                calendar_event_id=cal_id,
+                calendar_event_link=cal_link
             )
             saved_commitment = await self.db.add_commitment(commitment)
             logger.info(f"Registered commitment #{saved_commitment.id}: '{saved_commitment.task_title}'")
@@ -73,9 +109,9 @@ class EventsCog(commands.Cog):
             except Exception as re:
                 logger.debug(f"Could not add reaction: {re}")
 
-            # Send ephemeral or subtle confirmation embed with quick action buttons
+            # Send confirmation embed with quick action buttons
             embed = create_commitment_embed(saved_commitment, is_alert=False)
-            view = CommitmentActionView(saved_commitment, self.db, self.extractor)
+            view = CommitmentActionView(saved_commitment, self.db, self.extractor, self.calendar_service)
 
             # Post confirmation as reply in channel
             await message.reply(embed=embed, view=view, mention_author=False)
@@ -84,5 +120,10 @@ class EventsCog(commands.Cog):
             logger.error(f"Error processing message for commitments: {e}", exc_info=True)
 
 
-async def setup(bot: commands.Bot, db: Database, extractor: CommitmentExtractor):
-    await bot.add_cog(EventsCog(bot, db, extractor))
+async def setup(
+    bot: commands.Bot,
+    db: Database,
+    extractor: CommitmentExtractor,
+    calendar_service: Optional[GoogleCalendarService] = None
+):
+    await bot.add_cog(EventsCog(bot, db, extractor, calendar_service))

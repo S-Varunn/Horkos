@@ -5,6 +5,7 @@ from db.database import Database
 from db.models import Commitment, CommitmentStatus
 from llm.extractor import CommitmentExtractor
 from pipeline.filter import is_commitment_candidate
+from integrations.calendar_service import GoogleCalendarService
 from config import settings
 
 
@@ -19,6 +20,7 @@ async def run_simulation():
     db = Database(settings.database_path)
     await db.init_db()
     extractor = CommitmentExtractor()
+    cal_service = GoogleCalendarService()
 
     default_tests = [
         "I'll send that pitch deck to Sarah by 4 PM",
@@ -68,8 +70,33 @@ async def run_simulation():
             print(f"   Confidence Score:     {extracted.confidence_score:.2f}")
 
             if extracted.is_commitment:
-                # Save to database
+                # Schedule Google Calendar event
                 deadline_dt = datetime.fromisoformat(extracted.implied_deadline_utc.replace("Z", "+00:00")).replace(tzinfo=None)
+                
+                temp_commitment = Commitment(
+                    user_id="test_user_123",
+                    user_name="TestUser",
+                    channel_id="test_channel_001",
+                    message_id=str(int(datetime.now(timezone.utc).timestamp())),
+                    raw_text=user_input,
+                    task_title=extracted.task_title,
+                    recipient=extracted.recipient,
+                    deadline_utc=deadline_dt,
+                    relative_deadline_text=extracted.relative_deadline_text,
+                    context_snippet=extracted.context_snippet
+                )
+
+                cal_res = await cal_service.schedule_commitment_event(temp_commitment)
+                cal_id = cal_res.get("id")
+                cal_link = cal_res.get("htmlLink")
+
+                print(f"\n📅 Google Calendar Scheduled:")
+                print(f"   Event ID: {cal_id}")
+                print(f"   Mode:     {'Mock / Simulated Link' if cal_res.get('is_mock') else 'Live Google Calendar'}")
+                print(f"   Web Link: {cal_link}")
+                print(f"   Popups:   {cal_service.default_reminders} minutes before deadline")
+
+                # Save to database
                 commitment = Commitment(
                     user_id="test_user_123",
                     user_name="TestUser",
@@ -81,7 +108,9 @@ async def run_simulation():
                     deadline_utc=deadline_dt,
                     relative_deadline_text=extracted.relative_deadline_text,
                     context_snippet=extracted.context_snippet,
-                    status=CommitmentStatus.PENDING
+                    status=CommitmentStatus.PENDING,
+                    calendar_event_id=cal_id,
+                    calendar_event_link=cal_link
                 )
                 saved = await db.add_commitment(commitment)
                 print(f"\n💾 Saved to SQLite DB: Commitment #{saved.id} status: PENDING")
