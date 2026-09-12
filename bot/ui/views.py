@@ -30,6 +30,32 @@ class DraftUpdateModal(discord.ui.Modal, title="Draft Status Update"):
             await interaction.response.send_message(f"❌ Failed to post message: {e}", ephemeral=True)
 
 
+class PostDraftView(discord.ui.View):
+    def __init__(self, draft_text: str, channel: discord.TextChannel, timeout: Optional[float] = 300):
+        super().__init__(timeout=timeout)
+        self.draft_text = draft_text
+        self.channel = channel
+
+    @discord.ui.button(label="Post to Channel", style=discord.ButtonStyle.success, emoji="📤")
+    async def post_to_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        try:
+            if self.channel:
+                await self.channel.send(self.draft_text)
+            await interaction.response.edit_message(
+                content="✅ **Update posted to channel!**",
+                embed=None,
+                view=self
+            )
+        except Exception as e:
+            await interaction.response.edit_message(
+                content=f"❌ Failed to post update: {e}",
+                embed=None,
+                view=self
+            )
+
+
 class CommitmentActionView(discord.ui.View):
     def __init__(
         self,
@@ -86,18 +112,38 @@ class CommitmentActionView(discord.ui.View):
             await interaction.response.send_message("Only the commitment owner can draft updates.", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
-
-        # Call Hermes to generate contextual update
-        draft = await self.extractor.generate_resolution_draft(
-            task_title=self.commitment.task_title,
-            recipient=self.commitment.recipient,
-            original_deadline_text=self.commitment.relative_deadline_text,
-            speaker_name=self.commitment.user_name
+        # Show immediate visual loading feedback on button click
+        await interaction.response.send_message(
+            "⏳ **Calling Hermes AI via OpenRouter to draft an update...**",
+            ephemeral=True
         )
 
-        modal = DraftUpdateModal(
-            default_text=draft.suggested_reply,
-            channel=interaction.channel
-        )
-        await interaction.followup.send_modal(modal)
+        try:
+            draft = await self.extractor.generate_resolution_draft(
+                task_title=self.commitment.task_title,
+                recipient=self.commitment.recipient,
+                original_deadline_text=self.commitment.relative_deadline_text,
+                speaker_name=self.commitment.user_name
+            )
+
+            post_view = PostDraftView(
+                draft_text=draft.suggested_reply,
+                channel=interaction.channel
+            )
+            draft_embed = discord.Embed(
+                title="📝 AI-Generated Status Update",
+                description=f"> *\"{draft.suggested_reply}\"*",
+                color=discord.Color.blurple()
+            )
+            draft_embed.set_footer(text="Click below to post this update to the channel.")
+            await interaction.edit_original_response(
+                content="✨ **Here is your AI-drafted update:**",
+                embed=draft_embed,
+                view=post_view
+            )
+        except Exception as e:
+            await interaction.edit_original_response(
+                content=f"❌ Failed to generate draft update: {e}",
+                embed=None,
+                view=None
+            )

@@ -169,3 +169,21 @@ def create_already_accepted_plan_embed(
     )
     embed.set_footer(text="Commitment Radar • Consensus Memory")
     return embed
+
+
+def create_dining_loading_embed(cuisine_or_craving: str, location: str) -> discord.Embed:
+    """Creates a visually distinct loading card while the Hermes AI backend API call is running."""
+    embed = discord.Embed(
+        title="🍳 AI Concierge is Cooking...",
+        description=(
+            f"📡 **Calling OpenRouter AI Backend (Hermes 3)...**\n\n"
+            f"🍽️ **Target:** `{cuisine_or_craving}`\n"
+            f"📍 **Location:** `{location}`\n\n"
+            f"⏳ *Scouting top-rated spots, signature dishes, price tiers, and vibes...*"
+        ),
+        color=discord.Color.gold(),
+        timestamp=datetime.utcnow()
+    )
+    embed.set_footer(text="OpenRouter API in progress • Please hold on a moment...")
+    return embed
+

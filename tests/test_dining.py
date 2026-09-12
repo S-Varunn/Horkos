@@ -1,5 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock
+import discord
+from unittest.mock import AsyncMock, MagicMock
 from pipeline.filter import is_dining_inquiry
 from db.database import Database
 from db.models import DiningInquiry, DiningInquiryStatus
@@ -216,3 +217,150 @@ async def test_recent_resolved_dining_inquiry_db(tmp_path):
     # Other channels should return None
     other = await db.get_recent_resolved_dining_inquiry("chan_other", within_minutes=3)
     assert other is None
+
+
+def test_dining_loading_embed():
+    from bot.ui.embeds import create_dining_loading_embed
+    embed = create_dining_loading_embed("Pizza / Italian", "Austin, TX")
+    assert embed.title == "🍳 AI Concierge is Cooking..."
+    assert "Pizza / Italian" in embed.description
+    assert "Austin, TX" in embed.description
+    assert "Hermes 3" in embed.description
+    assert embed.color.value == discord.Color.gold().value
+
+
+@pytest.mark.asyncio
+async def test_dining_cuisine_click_loading_feedback(tmp_path):
+    from bot.ui.dining_views import DiningCuisineSelectionView
+    from unittest.mock import MagicMock
+
+    db_file = str(tmp_path / "test_views.db")
+    db = Database(db_path=db_file)
+    await db.init_db()
+
+    mock_client = AsyncMock()
+    mock_client.generate_json.return_value = {
+        "cuisine": "Pizza / Italian",
+        "location": "New York, NY",
+        "summary": "Great pizza spots",
+        "options": [
+            {
+                "name": "Joe's Pizza",
+                "cuisine_type": "Pizza",
+                "price_range": "$",
+                "vibe": "Classic NY slice",
+                "highlight_dish": "Plain Cheese",
+                "why_go": "Iconic slice"
+            }
+        ]
+    }
+    extractor = CommitmentExtractor(client=mock_client)
+
+    inquiry = DiningInquiry(
+        id=1,
+        channel_id="chan_1",
+        message_id="msg_1",
+        user_id="user_1",
+        user_name="Alice",
+        raw_text="where to eat?"
+    )
+
+    view = DiningCuisineSelectionView(inquiry, db, extractor)
+
+    # Mock interaction
+    interaction = AsyncMock()
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.channel = MagicMock()
+    interaction.channel.typing.return_value.__aenter__ = AsyncMock()
+    interaction.channel.typing.return_value.__aexit__ = AsyncMock()
+
+    await view._handle_cuisine_click(interaction, "Pizza / Italian")
+
+    # Verify immediate loading feedback was displayed
+    interaction.response.edit_message.assert_awaited_once()
+    loading_call_kwargs = interaction.response.edit_message.await_args.kwargs
+    assert "Contacting AI Concierge" in loading_call_kwargs["content"]
+    assert loading_call_kwargs["embed"] is not None
+    assert loading_call_kwargs["embed"].title == "🍳 AI Concierge is Cooking..."
+
+    # Verify buttons were disabled during processing
+    for btn in view.children:
+        assert btn.disabled is True
+
+    # Verify typing indicator was triggered
+    interaction.channel.typing.assert_called_once()
+
+    # Verify final result was published via edit_original_response
+    interaction.edit_original_response.assert_awaited_once()
+    final_kwargs = interaction.edit_original_response.await_args.kwargs
+    assert "Here are top picks for **Pizza / Italian**" in final_kwargs["content"]
+    assert final_kwargs["embed"] is not None
+    assert final_kwargs["embed"].title == "🍴 Top Pizza / Italian Spots in New York, NY"
+
+
+@pytest.mark.asyncio
+async def test_dining_more_options_loading_feedback(tmp_path):
+    from bot.ui.dining_views import RestaurantResultView
+    from unittest.mock import MagicMock
+
+    db_file = str(tmp_path / "test_more_options.db")
+    db = Database(db_path=db_file)
+    await db.init_db()
+
+    mock_client = AsyncMock()
+    mock_client.generate_json.return_value = {
+        "cuisine": "Alternative unique Tacos",
+        "location": "Austin, TX",
+        "summary": "Great alternative tacos",
+        "options": [
+            {
+                "name": "Torchy's Tacos",
+                "cuisine_type": "Tacos",
+                "price_range": "$$",
+                "vibe": "Funky casual",
+                "highlight_dish": "Trailer Park Taco",
+                "why_go": "Creative tacos"
+            }
+        ]
+    }
+    extractor = CommitmentExtractor(client=mock_client)
+
+    inquiry = DiningInquiry(
+        id=1,
+        channel_id="chan_1",
+        message_id="msg_1",
+        user_id="user_1",
+        user_name="Alice",
+        raw_text="where to eat?"
+    )
+
+    view = RestaurantResultView(
+        inquiry=inquiry,
+        cuisine="Tacos",
+        location="Austin, TX",
+        db=db,
+        extractor=extractor
+    )
+
+    interaction = AsyncMock()
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.channel = MagicMock()
+    interaction.channel.typing.return_value.__aenter__ = AsyncMock()
+    interaction.channel.typing.return_value.__aexit__ = AsyncMock()
+
+    await view.more_options.callback(interaction)
+
+    # Verify loading response was sent
+    interaction.response.edit_message.assert_awaited_once()
+    loading_call = interaction.response.edit_message.await_args.kwargs
+    assert "Querying AI Concierge for more Tacos" in loading_call["content"]
+    assert loading_call["embed"].title == "🍳 AI Concierge is Cooking..."
+
+    # Verify typing called
+    interaction.channel.typing.assert_called_once()
+
+    # Verify completion
+    interaction.edit_original_response.assert_awaited_once()
+    final_kwargs = interaction.edit_original_response.await_args.kwargs
+    assert "Fresh options for **Tacos**" in final_kwargs["content"]
+
