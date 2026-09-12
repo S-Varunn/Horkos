@@ -60,27 +60,45 @@ MESSAGE_TEXT: "{message_text}"
             )
             extracted = ExtractedCommitment(**raw_data)
 
-            # Ensure deadline_utc is properly formatted or defaulted if missing
+            # Ensure deadline_utc is properly formatted and localized
             if extracted.is_commitment:
-                if not extracted.implied_deadline_utc:
-                    extracted.implied_deadline_utc = (ref_time + timedelta(hours=2)).isoformat()
-                else:
-                    # Sanitize date parsing
+                import zoneinfo
+                try:
+                    user_tz = zoneinfo.ZoneInfo(settings.default_timezone)
+                except Exception:
+                    user_tz = timezone.utc
+
+                if extracted.implied_deadline_local:
+                    try:
+                        clean_str = extracted.implied_deadline_local.rstrip("Z").replace("+00:00", "")
+                        parsed_dt = date_parser.parse(clean_str)
+                        if parsed_dt.tzinfo is None:
+                            local_aware = parsed_dt.replace(tzinfo=user_tz)
+                        else:
+                            local_aware = parsed_dt.astimezone(user_tz)
+
+                        now_local = datetime.now(user_tz)
+                        if local_aware <= now_local and (now_local - local_aware).total_seconds() > 60:
+                            local_aware += timedelta(days=1)
+
+                        deadline_utc_dt = local_aware.astimezone(timezone.utc).replace(tzinfo=None)
+                    except Exception as pe:
+                        logger.warning(f"Could not parse local deadline '{extracted.implied_deadline_local}': {pe}")
+                        deadline_utc_dt = ref_time + timedelta(hours=2)
+                elif extracted.implied_deadline_utc:
                     try:
                         parsed_dt = date_parser.parse(extracted.implied_deadline_utc)
-                        # If timezone aware, convert to naive UTC
                         if parsed_dt.tzinfo is not None:
-                            parsed_dt = parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-                        # If deadline was parsed in the past (e.g. today 4pm when it's already 5pm),
-                        # roll it forward by 1 day so it is in the future
-                        if parsed_dt <= ref_time and (ref_time - parsed_dt).total_seconds() > 60:
-                            parsed_dt += timedelta(days=1)
-
-                        extracted.implied_deadline_utc = parsed_dt.isoformat()
+                            deadline_utc_dt = parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                        else:
+                            deadline_utc_dt = parsed_dt
                     except Exception as pe:
-                        logger.warning(f"Could not parse deadline string '{extracted.implied_deadline_utc}': {pe}")
-                        extracted.implied_deadline_utc = (ref_time + timedelta(hours=2)).isoformat()
+                        logger.warning(f"Could not parse UTC deadline '{extracted.implied_deadline_utc}': {pe}")
+                        deadline_utc_dt = ref_time + timedelta(hours=2)
+                else:
+                    deadline_utc_dt = ref_time + timedelta(hours=2)
+
+                extracted.implied_deadline_utc = deadline_utc_dt.isoformat()
 
             return extracted
         except Exception as e:

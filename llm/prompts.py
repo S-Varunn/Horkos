@@ -15,14 +15,15 @@ Non-commitments (ignore):
 - "Let's meet at 3" (Meeting coordination, not an individual task promise)
 
 RULES FOR EXTRACTION:
-1. Reference Time: Use the provided CURRENT_TIME_UTC as the baseline anchor.
-2. Relative Deadlines:
-   - "in X minutes/hours" -> Add to CURRENT_TIME_UTC.
-   - "by EOD" or "end of day" -> Current day at 17:00:00 (5:00 PM) in user's timezone.
+1. Baseline Anchor: Use CURRENT_LOCAL_TIME as the primary anchor for calculating deadlines.
+2. Calculating Deadlines:
+   - Specific clock time (e.g. "by 8 PM", "at 4", "10am") -> Set to that clock time on CURRENT_LOCAL_TIME date (e.g. 20:00:00 for 8 PM).
+   - "in X minutes/hours" -> Add X to CURRENT_LOCAL_TIME.
+   - "by EOD" or "end of day" -> Current day at 17:00:00 (5:00 PM).
    - "tonight" -> Current day at 20:00:00 (8:00 PM).
    - "after lunch" -> Current day at 13:30:00 (1:30 PM).
    - "tomorrow morning" -> Next day at 09:00:00 (9:00 AM).
-   - If no specific time is stated, default to 2 hours from CURRENT_TIME_UTC.
+   - If no specific time is stated, default to 2 hours from CURRENT_LOCAL_TIME.
 3. Output Format:
    Respond ONLY with a valid JSON object matching this schema:
    {
@@ -30,7 +31,7 @@ RULES FOR EXTRACTION:
      "task_title": "Concise actionable title",
      "recipient": "Target person or group or null",
      "relative_deadline_text": "text phrase from message",
-     "implied_deadline_utc": "YYYY-MM-DDTHH:MM:SSZ",
+     "implied_deadline_local": "YYYY-MM-DDTHH:MM:SS",
      "context_snippet": "short context summary",
      "confidence_score": 0.0 to 1.0
    }

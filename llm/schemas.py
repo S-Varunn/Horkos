@@ -18,6 +18,10 @@ class ExtractedCommitment(BaseModel):
         default="",
         description="The exact text snippet referring to the deadline or timeframe (e.g. 'by 4 PM', 'tonight', 'after lunch')"
     )
+    implied_deadline_local: Optional[str] = Field(
+        default=None,
+        description="The ISO 8601 local timestamp calculated in the user's timezone"
+    )
     implied_deadline_utc: Optional[str] = Field(
         default=None,
         description="The ISO 8601 UTC timestamp calculated from the message context and reference time"
