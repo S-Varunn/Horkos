@@ -22,6 +22,18 @@ SCOPES = [
 ]
 
 
+def render_calendar_template(template_str: str, context: Dict[str, Any]) -> str:
+    """Safely substitutes template placeholders without throwing KeyError on missing keys."""
+    class SafeDict(dict):
+        def __missing__(self, key):
+            return f"{{{key}}}"
+    try:
+        return template_str.format_map(SafeDict(context))
+    except Exception:
+        return template_str
+
+
+
 class GoogleCalendarService:
     def __init__(
         self,
@@ -265,16 +277,42 @@ class GoogleCalendarService:
 
         reminders_list = reminder_minutes or self.default_reminders
 
-        event_title = f"🎯 [Commitment] {commitment.task_title}"
-        description = (
-            f"🎯 Commitment Radar Auto-Scheduled Task\n\n"
-            f"• Task: {commitment.task_title}\n"
-            f"• Promised by: {commitment.user_name}\n"
-            f"• For / Recipient: {commitment.recipient or 'Team'}\n"
-            f"• Mentioned Timeframe: \"{commitment.relative_deadline_text}\"\n"
-            f"• Context: {commitment.context_snippet or 'Micro-commitment captured ambiently'}\n"
-            f"• Original Discord Message: \"{commitment.raw_text}\""
-        )
+        # Retrieve user's custom template if configured
+        user_template = None
+        if self.db and commitment.user_id:
+            try:
+                user_template = await self.db.get_user_calendar_template(commitment.user_id)
+            except Exception as te:
+                logger.warning(f"Could not load calendar template for user {commitment.user_id}: {te}")
+
+        template_context = {
+            "task": commitment.task_title,
+            "task_title": commitment.task_title,
+            "author": commitment.user_name,
+            "user_name": commitment.user_name,
+            "recipient": commitment.recipient or "Team",
+            "timeframe": commitment.relative_deadline_text or "Flexible",
+            "context": commitment.context_snippet or "",
+            "raw_text": commitment.raw_text,
+            "id": str(commitment.id or "")
+        }
+
+        if user_template and user_template.title_template:
+            event_title = render_calendar_template(user_template.title_template, template_context)
+        else:
+            event_title = commitment.task_title
+
+        if user_template and user_template.description_template:
+            description = render_calendar_template(user_template.description_template, template_context)
+        else:
+            description = (
+                f"Task: {commitment.task_title}\n"
+                f"Promised by: {commitment.user_name}\n"
+                f"Recipient: {commitment.recipient or 'Team'}\n"
+                f"Timeframe: {commitment.relative_deadline_text or 'Flexible'}\n"
+                f"Context: {commitment.context_snippet or 'Micro-commitment captured ambiently'}\n"
+                f"Original Message: \"{commitment.raw_text}\""
+            )
 
         overrides = [{"method": "popup", "minutes": m} for m in reminders_list]
         if any(m >= 30 for m in reminders_list):
@@ -399,9 +437,22 @@ class GoogleCalendarService:
                         eventId=event_id
                     ).execute()
                 )
+                user_template = None
+                if self.db and discord_user_id:
+                    try:
+                        user_template = await self.db.get_user_calendar_template(discord_user_id)
+                    except Exception as te:
+                        logger.warning(f"Could not load calendar template for complete_event: {te}")
+
+                comp_tpl = user_template.completed_template if (user_template and user_template.completed_template) else "[Done] {task}"
                 summary = event.get("summary", "")
-                if not summary.startswith("✅"):
-                    event["summary"] = f"✅ [Done] {task_title or summary.replace('🎯 [Commitment] ', '')}"
+                clean_task = task_title or summary.replace("🎯 [Commitment] ", "").replace("🎯 ", "").strip()
+                template_context = {
+                    "task": clean_task,
+                    "task_title": clean_task,
+                    "title": summary
+                }
+                event["summary"] = render_calendar_template(comp_tpl, template_context)
                 event["colorId"] = "10"  # Google Calendar Green (Basil)
 
                 updated_event = await loop.run_in_executor(

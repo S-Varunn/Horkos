@@ -45,3 +45,13 @@ class UserGoogleAuth(BaseModel):
     token_json: str
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class UserCalendarTemplate(BaseModel):
+    discord_user_id: str
+    title_template: str = "{task}"
+    completed_template: str = "[Done] {task}"
+    description_template: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+

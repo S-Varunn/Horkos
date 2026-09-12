@@ -1,7 +1,7 @@
 import aiosqlite
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from db.models import Commitment, CommitmentStatus, UserGoogleAuth, utc_now
+from db.models import Commitment, CommitmentStatus, UserGoogleAuth, UserCalendarTemplate, utc_now
 
 
 class Database:
@@ -38,6 +38,18 @@ class Database:
                     discord_user_id TEXT PRIMARY KEY,
                     google_email TEXT,
                     token_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # Multi-User Custom Calendar Template Table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_calendar_templates (
+                    discord_user_id TEXT PRIMARY KEY,
+                    title_template TEXT NOT NULL,
+                    completed_template TEXT NOT NULL,
+                    description_template TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -238,6 +250,69 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 "DELETE FROM user_google_auth WHERE discord_user_id = ?",
+                (discord_user_id,)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def save_user_calendar_template(
+        self,
+        discord_user_id: str,
+        title_template: str,
+        completed_template: Optional[str] = None,
+        description_template: Optional[str] = None
+    ) -> UserCalendarTemplate:
+        """Saves or updates a user's custom calendar event templates."""
+        now = utc_now().isoformat()
+        comp_tpl = completed_template or "[Done] {task}"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO user_calendar_templates (
+                    discord_user_id, title_template, completed_template,
+                    description_template, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(discord_user_id) DO UPDATE SET
+                    title_template = excluded.title_template,
+                    completed_template = excluded.completed_template,
+                    description_template = excluded.description_template,
+                    updated_at = excluded.updated_at
+            """, (discord_user_id, title_template, comp_tpl, description_template, now, now))
+            await db.commit()
+
+        return UserCalendarTemplate(
+            discord_user_id=discord_user_id,
+            title_template=title_template,
+            completed_template=comp_tpl,
+            description_template=description_template,
+            created_at=datetime.fromisoformat(now),
+            updated_at=datetime.fromisoformat(now)
+        )
+
+    async def get_user_calendar_template(self, discord_user_id: str) -> Optional[UserCalendarTemplate]:
+        """Retrieves a user's custom calendar event template if configured."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM user_calendar_templates WHERE discord_user_id = ?",
+                (discord_user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return UserCalendarTemplate(
+                        discord_user_id=row["discord_user_id"],
+                        title_template=row["title_template"],
+                        completed_template=row["completed_template"],
+                        description_template=row["description_template"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"])
+                    )
+        return None
+
+    async def delete_user_calendar_template(self, discord_user_id: str) -> bool:
+        """Deletes a user's custom calendar event template (reverting to default)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM user_calendar_templates WHERE discord_user_id = ?",
                 (discord_user_id,)
             )
             await db.commit()

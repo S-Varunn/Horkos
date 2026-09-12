@@ -10,7 +10,7 @@ from db.models import Commitment, CommitmentStatus
 from llm.extractor import CommitmentExtractor
 from bot.ui.embeds import create_commitments_list_embed, create_commitment_embed
 from bot.ui.views import CommitmentActionView
-from integrations.calendar_service import GoogleCalendarService
+from integrations.calendar_service import GoogleCalendarService, render_calendar_template
 from integrations.mcp_server import format_commitments_markdown, format_commitments_todoist
 from config import settings
 
@@ -291,6 +291,119 @@ class CommandsCog(commands.Cog):
                 for c in commitments
             ]
             await interaction.followup.send(f"```json\n{json.dumps(data, indent=2)}\n```", ephemeral=True)
+
+    calendar_template = app_commands.Group(
+        name="calendar-template",
+        description="Customize how your tasks look on Google Calendar"
+    )
+
+    @calendar_template.command(name="set", description="Set your custom Google Calendar task title and description templates")
+    @app_commands.describe(
+        title="Title template (e.g. 'Reminder: {task}' or '!!Reminder!! {task}')",
+        completed="Completed title template (e.g. '[Done] {task}' or 'COMPLETED: {task}')",
+        description="Optional custom description template"
+    )
+    async def template_set(
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        completed: Optional[str] = None,
+        description: Optional[str] = None
+    ):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        comp_tpl = completed or "[Done] {task}"
+
+        saved = await self.db.save_user_calendar_template(
+            discord_user_id=user_id,
+            title_template=title,
+            completed_template=comp_tpl,
+            description_template=description
+        )
+
+        sample_context = {
+            "task": "Update project documentation",
+            "task_title": "Update project documentation",
+            "author": interaction.user.display_name,
+            "user_name": interaction.user.display_name,
+            "recipient": "Sarah",
+            "timeframe": "by 5 PM",
+            "context": "Sarah requested update on docs",
+            "raw_text": "I'll update the project documentation by 5 PM"
+        }
+
+        title_preview = render_calendar_template(saved.title_template, sample_context)
+        comp_preview = render_calendar_template(saved.completed_template, sample_context)
+        desc_preview = render_calendar_template(saved.description_template, sample_context) if saved.description_template else "Standard clean metadata"
+
+        embed = discord.Embed(
+            title="Custom Calendar Template Saved",
+            description="Your personal Google Calendar event format has been saved!",
+            color=discord.Color.brand_green()
+        )
+        embed.add_field(name="Task Title Format", value=f"`{saved.title_template}`\n👉 **Preview**: {title_preview}", inline=False)
+        embed.add_field(name="Completed Format", value=f"`{saved.completed_template}`\n👉 **Preview**: {comp_preview}", inline=False)
+        if saved.description_template:
+            embed.add_field(name="Description Format", value=f"```text\n{desc_preview}\n```", inline=False)
+        embed.set_footer(text="Available variables: {task}, {author}, {recipient}, {timeframe}, {context}, {raw_text}")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @calendar_template.command(name="view", description="View your active Google Calendar task template")
+    async def template_view(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        tpl = await self.db.get_user_calendar_template(user_id)
+
+        sample_context = {
+            "task": "Update project documentation",
+            "task_title": "Update project documentation",
+            "author": interaction.user.display_name,
+            "user_name": interaction.user.display_name,
+            "recipient": "Sarah",
+            "timeframe": "by 5 PM",
+            "context": "Sarah requested update on docs",
+            "raw_text": "I'll update the project documentation by 5 PM"
+        }
+
+        embed = discord.Embed(
+            title="Your Google Calendar Template Settings",
+            color=discord.Color.blue()
+        )
+
+        if tpl:
+            title_prev = render_calendar_template(tpl.title_template, sample_context)
+            comp_prev = render_calendar_template(tpl.completed_template, sample_context)
+            embed.add_field(name="Title Template", value=f"`{tpl.title_template}`\n👉 Preview: {title_prev}", inline=False)
+            embed.add_field(name="Completed Template", value=f"`{tpl.completed_template}`\n👉 Preview: {comp_prev}", inline=False)
+            if tpl.description_template:
+                desc_prev = render_calendar_template(tpl.description_template, sample_context)
+                embed.add_field(name="Description Template", value=f"```text\n{desc_prev}\n```", inline=False)
+            else:
+                embed.add_field(name="Description Template", value="*Clean default metadata*", inline=False)
+        else:
+            embed.description = "You are currently using the **Clean Minimalist Default** (no emojis or clutter)."
+            embed.add_field(name="Default Title", value="`{task}`\n👉 Preview: Update project documentation", inline=False)
+            embed.add_field(name="Default Completed", value="`[Done] {task}`\n👉 Preview: [Done] Update project documentation", inline=False)
+
+        embed.add_field(
+            name="Available Variables",
+            value="`{task}` - Task description\n`{author}` - Your name\n`{recipient}` - Recipient or Team\n`{timeframe}` - Deadline text\n`{context}` - Conversation snippet\n`{raw_text}` - Original chat message",
+            inline=False
+        )
+        embed.set_footer(text="Use /calendar-template set to change or /calendar-template reset to clear")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @calendar_template.command(name="reset", description="Reset your Google Calendar templates to default clean formatting")
+    async def template_reset(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        deleted = await self.db.delete_user_calendar_template(user_id)
+
+        if deleted:
+            await interaction.followup.send("Your calendar template has been reset to the clean default format (`{task}`).", ephemeral=True)
+        else:
+            await interaction.followup.send("You are already using the clean default template.", ephemeral=True)
 
 
 async def setup(
