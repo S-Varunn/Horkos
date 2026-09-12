@@ -1,7 +1,7 @@
 import aiosqlite
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from db.models import Commitment, CommitmentStatus, UserGoogleAuth, UserCalendarTemplate, ChannelCalendarTemplate, utc_now
+from db.models import Commitment, CommitmentStatus, DiningInquiry, DiningInquiryStatus, UserGoogleAuth, UserCalendarTemplate, ChannelCalendarTemplate, utc_now
 
 
 class Database:
@@ -84,6 +84,25 @@ class Database:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_commitments_user 
                 ON commitments (user_id, status)
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS dining_inquiries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    user_name TEXT NOT NULL,
+                    guild_id TEXT,
+                    raw_text TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'WAITING',
+                    chosen_cuisine TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dining_channel_status
+                ON dining_inquiries (channel_id, status)
             """)
             await db.commit()
 
@@ -428,3 +447,100 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"])
         )
+    async def add_dining_inquiry(self, inquiry: DiningInquiry) -> DiningInquiry:
+        """Inserts a new dining inquiry and assigns its generated ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO dining_inquiries (
+                    channel_id, message_id, user_id, user_name, guild_id,
+                    raw_text, status, chosen_cuisine, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                inquiry.channel_id,
+                inquiry.message_id,
+                inquiry.user_id,
+                inquiry.user_name,
+                inquiry.guild_id,
+                inquiry.raw_text,
+                inquiry.status.value if hasattr(inquiry.status, 'value') else inquiry.status,
+                inquiry.chosen_cuisine,
+                inquiry.created_at.isoformat(),
+                inquiry.updated_at.isoformat()
+            ))
+            await db.commit()
+            inquiry.id = cursor.lastrowid
+            return inquiry
+
+    async def get_active_dining_inquiry_for_channel(self, channel_id: str) -> Optional[DiningInquiry]:
+        """Gets the most recent waiting dining inquiry in a channel."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM dining_inquiries
+                WHERE channel_id = ? AND status = 'WAITING'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (channel_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return self._row_to_dining_inquiry(row)
+        return None
+
+    async def update_dining_inquiry_status(
+        self,
+        inquiry_id: int,
+        status: DiningInquiryStatus,
+        chosen_cuisine: Optional[str] = None
+    ) -> bool:
+        """Updates status and optionally chosen cuisine for a dining inquiry."""
+        now = utc_now().isoformat()
+        status_val = status.value if hasattr(status, 'value') else status
+        async with aiosqlite.connect(self.db_path) as db:
+            if chosen_cuisine is not None:
+                cursor = await db.execute("""
+                    UPDATE dining_inquiries
+                    SET status = ?, chosen_cuisine = ?, updated_at = ?
+                    WHERE id = ?
+                """, (status_val, chosen_cuisine, now, inquiry_id))
+            else:
+                cursor = await db.execute("""
+                    UPDATE dining_inquiries
+                    SET status = ?, updated_at = ?
+                    WHERE id = ?
+                """, (status_val, now, inquiry_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    def _row_to_dining_inquiry(self, row: aiosqlite.Row) -> DiningInquiry:
+        return DiningInquiry(
+            id=row["id"],
+            channel_id=row["channel_id"],
+            message_id=row["message_id"],
+            user_id=row["user_id"],
+            user_name=row["user_name"],
+            guild_id=row["guild_id"],
+            raw_text=row["raw_text"],
+            status=DiningInquiryStatus(row["status"]),
+            chosen_cuisine=row["chosen_cuisine"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"])
+        )
+    async def get_recent_resolved_dining_inquiry(
+        self,
+        channel_id: str,
+        within_minutes: int = 3
+    ) -> Optional[DiningInquiry]:
+        """Gets the most recently resolved dining plan in a channel within the history window."""
+        cutoff = (utc_now() - timedelta(minutes=within_minutes)).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM dining_inquiries
+                WHERE channel_id = ? AND status = 'RESOLVED' AND updated_at >= ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """, (channel_id, cutoff)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return self._row_to_dining_inquiry(row)
+        return None
