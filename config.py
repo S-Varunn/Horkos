@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     alert_advance_minutes: int = Field(default=10, alias="ALERT_ADVANCE_MINUTES")
     check_interval_seconds: int = Field(default=30, alias="CHECK_INTERVAL_SECONDS")
 
+    # Ambient Dining Assistant Settings
+    dining_inquiry_timeout_seconds: int = Field(default=15, alias="DINING_INQUIRY_TIMEOUT_SECONDS")
+    dining_history_window_minutes: int = Field(default=3, alias="DINING_HISTORY_WINDOW_MINUTES")
+    accepted_plan_memory_hours: int = Field(default=4, alias="ACCEPTED_PLAN_MEMORY_HOURS")
+    default_location: str = Field(default="New York, NY", alias="DEFAULT_LOCATION")
+
     # Google Calendar Settings
     google_calendar_enabled: bool = Field(default=True, alias="GOOGLE_CALENDAR_ENABLED")
     google_credentials_file: str = Field(default="credentials.json", alias="GOOGLE_CREDENTIALS_FILE")
