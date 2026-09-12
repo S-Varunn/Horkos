@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     database_path: str = Field(default="commitment_radar.db", alias="DATABASE_PATH")
 
     # Scheduler Settings
-    default_timezone: str = Field(default="UTC", alias="DEFAULT_TIMEZONE")
-    alert_advance_minutes: int = Field(default=30, alias="ALERT_ADVANCE_MINUTES")
+    default_timezone: str = Field(default="America/New_York", alias="DEFAULT_TIMEZONE")
+    alert_advance_minutes: int = Field(default=10, alias="ALERT_ADVANCE_MINUTES")
     check_interval_seconds: int = Field(default=30, alias="CHECK_INTERVAL_SECONDS")
 
     # Google Calendar Settings

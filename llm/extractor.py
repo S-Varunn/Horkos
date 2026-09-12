@@ -33,7 +33,17 @@ class CommitmentExtractor:
         ref_time = reference_time or utc_now()
         ref_iso = ref_time.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-        user_prompt = f"""CURRENT_TIME_UTC: {ref_iso}
+        # Local time formatting for timezone context
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo(settings.default_timezone)
+            local_dt = datetime.now(tz)
+            local_str = local_dt.strftime("%Y-%m-%d %I:%M %p %Z")
+        except Exception:
+            local_str = ref_iso
+
+        user_prompt = f"""CURRENT_LOCAL_TIME: {local_str}
+CURRENT_TIME_UTC: {ref_iso}
 USER_TIMEZONE: {settings.default_timezone}
 SPEAKER: {author_name}
 MESSAGE_TEXT: "{message_text}"
@@ -58,9 +68,16 @@ MESSAGE_TEXT: "{message_text}"
                     # Sanitize date parsing
                     try:
                         parsed_dt = date_parser.parse(extracted.implied_deadline_utc)
-                        # If naive, assume UTC
-                        if parsed_dt.tzinfo is None:
-                            extracted.implied_deadline_utc = parsed_dt.isoformat()
+                        # If timezone aware, convert to naive UTC
+                        if parsed_dt.tzinfo is not None:
+                            parsed_dt = parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+                        # If deadline was parsed in the past (e.g. today 4pm when it's already 5pm),
+                        # roll it forward by 1 day so it is in the future
+                        if parsed_dt <= ref_time and (ref_time - parsed_dt).total_seconds() > 60:
+                            parsed_dt += timedelta(days=1)
+
+                        extracted.implied_deadline_utc = parsed_dt.isoformat()
                     except Exception as pe:
                         logger.warning(f"Could not parse deadline string '{extracted.implied_deadline_utc}': {pe}")
                         extracted.implied_deadline_utc = (ref_time + timedelta(hours=2)).isoformat()

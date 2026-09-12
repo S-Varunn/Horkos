@@ -146,18 +146,13 @@ class EventsCog(commands.Cog):
             saved_commitment = await self.db.add_commitment(commitment)
             logger.info(f"Registered commitment #{saved_commitment.id}: '{saved_commitment.task_title}'")
 
-            # Passive UX: Add subtle reaction to the user's message
+            # Ambient UX: Directly add to calendar and acknowledge with subtle emoji reactions (no intrusive chat messages)
             try:
                 await message.add_reaction("🎯")
+                if cal_id and not str(cal_id).startswith("gcal_sim_"):
+                    await message.add_reaction("📅")
             except Exception as re:
                 logger.debug(f"Could not add reaction: {re}")
-
-            # Send confirmation embed with quick action buttons
-            embed = create_commitment_embed(saved_commitment, is_alert=False)
-            view = CommitmentActionView(saved_commitment, self.db, self.extractor, self.calendar_service)
-
-            # Post confirmation as reply in channel
-            await message.reply(embed=embed, view=view, mention_author=False)
 
         except Exception as e:
             logger.error(f"Error processing message for commitments: {e}", exc_info=True)

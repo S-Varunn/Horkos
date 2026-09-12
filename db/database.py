@@ -104,16 +104,19 @@ class Database:
                     return self._row_to_commitment(row)
         return None
 
-    async def get_due_alerts(self, lead_minutes: int = 30) -> List[Commitment]:
-        """Finds PENDING commitments whose deadline falls within the notification window."""
-        cutoff = (utc_now() + timedelta(minutes=lead_minutes)).isoformat()
+    async def get_due_alerts(self, lead_minutes: int = 10) -> List[Commitment]:
+        """Finds PENDING commitments whose deadline is upcoming and falls within the notification window."""
+        now_iso = utc_now().isoformat()
+        cutoff_iso = (utc_now() + timedelta(minutes=lead_minutes)).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT * FROM commitments
-                WHERE status = 'PENDING' AND deadline_utc <= ?
+                WHERE status = 'PENDING'
+                  AND deadline_utc > ?
+                  AND deadline_utc <= ?
                 ORDER BY deadline_utc ASC
-            """, (cutoff,)) as cursor:
+            """, (now_iso, cutoff_iso)) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_commitment(r) for r in rows]
 
