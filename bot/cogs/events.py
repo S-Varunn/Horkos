@@ -315,6 +315,7 @@ class EventsCog(commands.Cog):
                 user_id=str(message.author.id),
                 user_name=message.author.display_name,
                 channel_id=channel_id_str,
+                channel_name=ch_name,
                 guild_id=str(message.guild.id) if message.guild else None,
                 message_id=str(message.id),
                 raw_text=message.content,
@@ -343,13 +344,6 @@ class EventsCog(commands.Cog):
                     await message.add_reaction("📅")
             except Exception as re:
                 logger.debug(f"Could not add reaction: {re}")
-
-            # Send confirmation embed with quick action buttons
-            embed = create_commitment_embed(saved_commitment, is_alert=False)
-            view = CommitmentActionView(saved_commitment, self.db, self.extractor)
-
-            # Post confirmation as reply in channel
-            await message.reply(embed=embed, view=view, mention_author=False)
 
         except Exception as e:
             logger.error(f"Error processing message for commitments: {e}", exc_info=True)
